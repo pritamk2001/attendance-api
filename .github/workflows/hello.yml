@@ -1,15 +1,58 @@
-name: My First Workflow
+name: Credential Scanning
 
 on:
   push:
+    branches:
+      - main
+      - master
+
+  pull_request:
+
+  workflow_dispatch:
 
 jobs:
-  hello:
+  cred-scan:
+    name: Checkout and Scan Repository
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+
     steps:
-      - run: echo "Hello GitHub Actions"
-      - run: pwd
-      - run: ls -la
-      - run: whoami
-      - run: uname -a
+      # Step 1: Checkout Repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Step 2: Verify Repository
+      - name: Verify Files
+        run: |
+          pwd
+          ls -la
+
+      # Step 3: Install Gitleaks
+      - name: Install Gitleaks
+        run: |
+          wget -q https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz
+          tar -xzf gitleaks_linux_x64.tar.gz
+          sudo mv gitleaks /usr/local/bin/
+          gitleaks version
+
+      # Step 4: Run Credential Scan
+      - name: Scan Repository
+        run: |
+          mkdir -p reports
+
+          gitleaks detect \
+            --source . \
+            --report-format json \
+            --report-path reports/gitleaks-report.json \
+            --exit-code 0
+
+      # Step 5: Upload Report
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: reports/gitleaks-report.json
