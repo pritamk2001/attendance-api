@@ -34,9 +34,7 @@ jobs:
       # Step 3: Install Gitleaks
       - name: Install Gitleaks
         run: |
-          wget -q https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz
-          tar -xzf gitleaks_linux_x64.tar.gz
-          sudo mv gitleaks /usr/local/bin/
+          curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh -s -- -b /usr/local/bin
           gitleaks version
 
       # Step 4: Run Credential Scan
@@ -50,7 +48,12 @@ jobs:
             --report-path reports/gitleaks-report.json \
             --exit-code 0
 
-      # Step 5: Upload Report
+      # Step 5: Display Report
+      - name: Show Report
+        run: |
+          cat reports/gitleaks-report.json
+
+      # Step 6: Upload Report
       - name: Upload Report
         uses: actions/upload-artifact@v4
         with:
