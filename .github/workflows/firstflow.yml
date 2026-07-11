@@ -29,21 +29,15 @@ jobs:
           name: gitleaks-results
           path: results.sarif
 
-      - name: Send Report to Discord
+      - name: Send Discord Notification
         if: always()
         run: |
-          MESSAGE="🔍 Gitleaks Scan Completed
-
-          Repository: ${{ github.repository }}
-          Branch: ${{ github.ref_name }}
-          Triggered By: ${{ github.actor }}
-          Commit: ${{ github.sha }}
-          Workflow: ${{ github.workflow }}
-
-          📎 Report Attached"
+          echo '{
+            "content": "🔍 Gitleaks Scan Completed\n\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nTriggered By: ${{ github.actor }}\nCommit: ${{ github.sha }}\nWorkflow: ${{ github.workflow }}\n\n📎 Gitleaks report attached."
+          }' > payload.json
 
           curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
-            -F "payload_json={\"content\":\"${MESSAGE}\"}" \
+            -F "payload_json=@payload.json;type=application/json" \
             -F "file=@results.sarif"
 
       - name: Fail Workflow if Leaks Found
