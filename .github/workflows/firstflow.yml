@@ -31,9 +31,9 @@ jobs:
       - name: Generate Readable Report
         if: always()
         run: |
-          echo "==========================================" > gitleaks-report.txt
-          echo "      GITLEAKS CREDENTIAL SCAN REPORT" >> gitleaks-report.txt
-          echo "==========================================" >> gitleaks-report.txt
+          echo "====================================================" > gitleaks-report.txt
+          echo "           GITLEAKS CREDENTIAL SCAN REPORT" >> gitleaks-report.txt
+          echo "====================================================" >> gitleaks-report.txt
           echo "" >> gitleaks-report.txt
           echo "Repository : ${{ github.repository }}" >> gitleaks-report.txt
           echo "Branch     : ${{ github.ref_name }}" >> gitleaks-report.txt
@@ -41,19 +41,43 @@ jobs:
           echo "Commit ID  : ${{ github.sha }}" >> gitleaks-report.txt
           echo "Workflow   : ${{ github.workflow }}" >> gitleaks-report.txt
           echo "Run Number : ${{ github.run_number }}" >> gitleaks-report.txt
+          echo "Run URL    : https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> gitleaks-report.txt
           echo "Generated  : $(date -u)" >> gitleaks-report.txt
           echo "" >> gitleaks-report.txt
 
-          if grep -q '"ruleId"' results.sarif; then
-            echo "Status : FAILED" >> gitleaks-report.txt
+          COUNT=$(jq '[.runs[].results[]] | length' results.sarif)
+
+          echo "====================================================" >> gitleaks-report.txt
+          echo "SCAN SUMMARY" >> gitleaks-report.txt
+          echo "====================================================" >> gitleaks-report.txt
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "Status              : PASSED ✅" >> gitleaks-report.txt
+            echo "Secrets Found       : 0" >> gitleaks-report.txt
             echo "" >> gitleaks-report.txt
-            echo "Secrets were detected during the scan." >> gitleaks-report.txt
-            echo "" >> gitleaks-report.txt
-            echo "Please check the attached SARIF report in GitHub Artifacts for complete details." >> gitleaks-report.txt
+            echo "No credentials or secrets were detected." >> gitleaks-report.txt
           else
-            echo "Status : PASSED" >> gitleaks-report.txt
+            echo "Status              : FAILED ❌" >> gitleaks-report.txt
+            echo "Secrets Found       : $COUNT" >> gitleaks-report.txt
             echo "" >> gitleaks-report.txt
-            echo "No secrets were detected." >> gitleaks-report.txt
+
+            echo "====================================================" >> gitleaks-report.txt
+            echo "LEAK DETAILS" >> gitleaks-report.txt
+            echo "====================================================" >> gitleaks-report.txt
+
+            jq -r '
+            .runs[].results[] |
+            "Rule        : \(.ruleId)\nFile        : \(.locations[0].physicalLocation.artifactLocation.uri)\nLine        : \(.locations[0].physicalLocation.region.startLine)\nMessage     : \(.message.text)\n----------------------------------------------------"
+            ' results.sarif >> gitleaks-report.txt
+
+            echo "" >> gitleaks-report.txt
+            echo "====================================================" >> gitleaks-report.txt
+            echo "RECOMMENDATION" >> gitleaks-report.txt
+            echo "====================================================" >> gitleaks-report.txt
+            echo "1. Remove the exposed secret from the repository." >> gitleaks-report.txt
+            echo "2. Rotate the leaked credentials immediately." >> gitleaks-report.txt
+            echo "3. Rewrite Git history if the secret was committed." >> gitleaks-report.txt
+            echo "4. Push the updated code after verification." >> gitleaks-report.txt
           fi
 
       - name: Send Discord Notification
@@ -67,7 +91,7 @@ jobs:
 
           curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
             -F 'payload_json={
-              "content":"**Credential Scan Report**\n\nRepository: '"${{ github.repository }}"'\nBranch: '"${{ github.ref_name }}"'\nTriggered By: '"${{ github.actor }}"'\nCommit: '"${{ github.sha }}"'\nStatus: '"${STATUS}"'\n📦 Detailed Gitleaks report is available in GitHub Artifacts."
+              "content":"**Credential Scan Report**\n\nRepository: '"${{ github.repository }}"'\nBranch: '"${{ github.ref_name }}"'\nTriggered By: '"${{ github.actor }}"'\nCommit: '"${{ github.sha }}"'\nStatus: '"${STATUS}"'\n📦 Detailed Gitleaks report."
             }' \
             -F "file=@gitleaks-report.txt"
 
