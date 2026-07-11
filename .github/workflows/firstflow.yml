@@ -22,23 +22,55 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Gitleaks Report
+      - name: Upload SARIF Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gitleaks-results
           path: results.sarif
 
+      - name: Generate Readable Report
+        if: always()
+        run: |
+          echo "==========================================" > gitleaks-report.txt
+          echo "      GITLEAKS CREDENTIAL SCAN REPORT" >> gitleaks-report.txt
+          echo "==========================================" >> gitleaks-report.txt
+          echo "" >> gitleaks-report.txt
+          echo "Repository : ${{ github.repository }}" >> gitleaks-report.txt
+          echo "Branch     : ${{ github.ref_name }}" >> gitleaks-report.txt
+          echo "Triggered By : ${{ github.actor }}" >> gitleaks-report.txt
+          echo "Commit ID  : ${{ github.sha }}" >> gitleaks-report.txt
+          echo "Workflow   : ${{ github.workflow }}" >> gitleaks-report.txt
+          echo "Run Number : ${{ github.run_number }}" >> gitleaks-report.txt
+          echo "Generated  : $(date -u)" >> gitleaks-report.txt
+          echo "" >> gitleaks-report.txt
+
+          if grep -q '"ruleId"' results.sarif; then
+            echo "Status : FAILED ❌" >> gitleaks-report.txt
+            echo "" >> gitleaks-report.txt
+            echo "Secrets were detected during the scan." >> gitleaks-report.txt
+            echo "" >> gitleaks-report.txt
+            echo "Please check the attached SARIF report in GitHub Artifacts for complete details." >> gitleaks-report.txt
+          else
+            echo "Status : PASSED ✅" >> gitleaks-report.txt
+            echo "" >> gitleaks-report.txt
+            echo "No secrets were detected." >> gitleaks-report.txt
+          fi
+
       - name: Send Discord Notification
         if: always()
         run: |
-          echo '{
-            "content": "🔍 Gitleaks Scan Completed\n\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nTriggered By: ${{ github.actor }}\nCommit: ${{ github.sha }}\nWorkflow: ${{ github.workflow }}\n\n📎 Gitleaks report attached."
-          }' > payload.json
+          STATUS="✅ PASSED"
+
+          if grep -q '"ruleId"' results.sarif; then
+            STATUS="❌ FAILED"
+          fi
 
           curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
-            -F "payload_json=@payload.json;type=application/json" \
-            -F "file=@results.sarif"
+            -F 'payload_json={
+              "content":"🔐 **Credential Scan Report**\n\nRepository: '"${{ github.repository }}"'\nBranch: '"${{ github.ref_name }}"'\nTriggered By: '"${{ github.actor }}"'\nCommit: '"${{ github.sha }}"'\nStatus: '"${STATUS}"'\n\n📄 Human-readable report is attached.\n📦 Detailed SARIF report is available in GitHub Artifacts."
+            }' \
+            -F "file=@gitleaks-report.txt"
 
       - name: Fail Workflow if Leaks Found
         if: steps.gitleaks.outcome == 'failure'
