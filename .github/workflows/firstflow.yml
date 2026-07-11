@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - master
   pull_request:
 
 jobs:
@@ -31,18 +32,18 @@ jobs:
       - name: Send Report to Discord
         if: always()
         run: |
-          curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
-            -F "payload_json={
-              \"content\":\"🔍 **Gitleaks Scan Report**
-              
-Repository: ${{ github.repository }}
-Branch: ${{ github.ref_name }}
-Triggered By: ${{ github.actor }}
-Commit: ${{ github.sha }}
-Workflow: ${{ github.workflow }}
+          MESSAGE="🔍 Gitleaks Scan Completed
 
-📎 Gitleaks report is attached.
-\"}" \
+          Repository: ${{ github.repository }}
+          Branch: ${{ github.ref_name }}
+          Triggered By: ${{ github.actor }}
+          Commit: ${{ github.sha }}
+          Workflow: ${{ github.workflow }}
+
+          📎 Report Attached"
+
+          curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+            -F "payload_json={\"content\":\"${MESSAGE}\"}" \
             -F "file=@results.sarif"
 
       - name: Fail Workflow if Leaks Found
