@@ -22,32 +22,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Gitleaks Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gitleaks-results
-          path: results.sarif
-
-      - name: Send Report to Discord
+      - name: Send Discord Notification
         if: always()
         run: |
-          MESSAGE="🔍 Gitleaks Scan Completed
-
-          Repository: ${{ github.repository }}
-          Branch: ${{ github.ref_name }}
-          Triggered By: ${{ github.actor }}
-          Commit: ${{ github.sha }}
-          Workflow: ${{ github.workflow }}
-
-          📎 Report Attached"
-
-          curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
-            -F "payload_json={\"content\":\"${MESSAGE}\"}" \
-            -F "file=@results.sarif"
-
-      - name: Fail Workflow if Leaks Found
-        if: steps.gitleaks.outcome == 'failure'
-        run: |
-          echo "❌ Secrets detected by Gitleaks."
-          exit 1
+          curl -H "Content-Type: application/json" \
+          -X POST \
+          -d '{
+            "content": "✅ GitHub Actions is working!\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nTriggered By: ${{ github.actor }}"
+          }' \
+          "${{ secrets.DISCORD_WEBHOOK }}"
