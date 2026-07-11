@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - master
   pull_request:
 
 jobs:
@@ -46,13 +45,13 @@ jobs:
           echo "" >> gitleaks-report.txt
 
           if grep -q '"ruleId"' results.sarif; then
-            echo "Status : FAILED ❌" >> gitleaks-report.txt
+            echo "Status : FAILED" >> gitleaks-report.txt
             echo "" >> gitleaks-report.txt
             echo "Secrets were detected during the scan." >> gitleaks-report.txt
             echo "" >> gitleaks-report.txt
             echo "Please check the attached SARIF report in GitHub Artifacts for complete details." >> gitleaks-report.txt
           else
-            echo "Status : PASSED ✅" >> gitleaks-report.txt
+            echo "Status : PASSED" >> gitleaks-report.txt
             echo "" >> gitleaks-report.txt
             echo "No secrets were detected." >> gitleaks-report.txt
           fi
@@ -60,20 +59,20 @@ jobs:
       - name: Send Discord Notification
         if: always()
         run: |
-          STATUS="✅ PASSED"
+          STATUS=" PASSED"
 
           if grep -q '"ruleId"' results.sarif; then
-            STATUS="❌ FAILED"
+            STATUS=" FAILED"
           fi
 
           curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
             -F 'payload_json={
-              "content":"🔐 **Credential Scan Report**\n\nRepository: '"${{ github.repository }}"'\nBranch: '"${{ github.ref_name }}"'\nTriggered By: '"${{ github.actor }}"'\nCommit: '"${{ github.sha }}"'\nStatus: '"${STATUS}"'\n\n📄 Human-readable report is attached.\n📦 Detailed SARIF report is available in GitHub Artifacts."
+              "content":"**Credential Scan Report**\n\nRepository: '"${{ github.repository }}"'\nBranch: '"${{ github.ref_name }}"'\nTriggered By: '"${{ github.actor }}"'\nCommit: '"${{ github.sha }}"'\nStatus: '"${STATUS}"'\n📦 Detailed Gitleaks report is available in GitHub Artifacts."
             }' \
             -F "file=@gitleaks-report.txt"
 
       - name: Fail Workflow if Leaks Found
         if: steps.gitleaks.outcome == 'failure'
         run: |
-          echo "❌ Secrets detected by Gitleaks."
+          echo " Secrets detected by Gitleaks."
           exit 1
