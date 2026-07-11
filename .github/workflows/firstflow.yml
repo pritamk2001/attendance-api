@@ -1,0 +1,66 @@
+name: Credential Scanning with GitLeaks
+
+on:
+  # push:
+  #   branches: [ main, develop ]
+  #pull_request:
+    #branches: [ main, develop ]
+  #schedule:
+  # - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  gitleaks-scan:
+    name: Scan Repository for Credentials
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Install GitLeaks
+        run: |
+          wget https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks-linux-x64
+          chmod +x gitleaks-linux-x64
+          sudo mv gitleaks-linux-x64 /usr/local/bin/gitleaks
+          gitleaks version
+      
+      - name: Run GitLeaks Scan - Full History
+        id: gitleaks_full
+        continue-on-error: true
+        run: |
+          gitleaks detect --source . --verbose --report-path gitleaks-report-full.json
+      
+      - name: Run GitLeaks Scan - Current Branch
+        id: gitleaks_branch
+        continue-on-error: true
+        run: |
+          gitleaks detect --source . --verbose --report-path gitleaks-report-branch.json
+      
+      - name: Upload GitLeaks Reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: gitleaks-reports
+          path: gitleaks-report-*.json
+          retention-days: 30
+      
+      - name: Create Summary Report
+        if: always()
+        run: |
+          echo "# GitLeaks Scan Report" > scan-summary.md
+          echo "Scan completed at $(date)" >> scan-summary.md
+          echo "" >> scan-summary.md
+          if [ -f gitleaks-report-full.json ]; then
+            LEAK_COUNT=$(jq '.[] | length' gitleaks-report-full.json 2>/dev/null || echo "0")
+            echo "- **Total Leaks Found**: $LEAK_COUNT" >> scan-summary.md
+          fi
+      
+      - name: Upload Summary
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: scan-summary
+          path: scan-summary.md
