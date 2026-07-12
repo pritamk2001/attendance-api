@@ -6,6 +6,9 @@ on:
       - main
   pull_request:
 
+env:
+  IMAGE_NAME: ${{ github.event.repository.name }}
+
 jobs:
   credential-scan:
     runs-on: ubuntu-latest
@@ -41,7 +44,6 @@ jobs:
           echo "Commit ID  : ${{ github.sha }}" >> gitleaks-report.txt
           echo "Workflow   : ${{ github.workflow }}" >> gitleaks-report.txt
           echo "Run Number : ${{ github.run_number }}" >> gitleaks-report.txt
-          echo "Run URL    : https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> gitleaks-report.txt
           echo "Generated  : $(date -u)" >> gitleaks-report.txt
           echo "" >> gitleaks-report.txt
 
@@ -55,9 +57,14 @@ jobs:
             echo "Secrets Found : $COUNT" >> gitleaks-report.txt
 
             echo "" >> gitleaks-report.txt
+
             jq -r '
             .runs[].results[] |
-            "Rule    : \(.ruleId)\nFile    : \(.locations[0].physicalLocation.artifactLocation.uri)\nLine    : \(.locations[0].physicalLocation.region.startLine)\nMessage : \(.message.text)\n--------------------------------------------------"
+            "Rule    : \(.ruleId)
+            File    : \(.locations[0].physicalLocation.artifactLocation.uri)
+            Line    : \(.locations[0].physicalLocation.region.startLine)
+            Message : \(.message.text)
+            --------------------------------------------------"
             ' results.sarif >> gitleaks-report.txt
           fi
 
@@ -72,7 +79,12 @@ jobs:
 
           curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
             -F 'payload_json={
-              "content":"**Credential Scan Report**\n\nRepository: '"${{ github.repository }}"'\nBranch: '"${{ github.ref_name }}"'\nTriggered By: '"${{ github.actor }}"'\nCommit: '"${{ github.sha }}"'\nStatus: '"${STATUS}"'"
+            "content":"**Credential Scan Report**
+
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Triggered By: ${{ github.actor }}
+            Status: '"${STATUS}"'"
             }' \
             -F "file=@gitleaks-report.txt"
 
@@ -91,6 +103,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Extract Short SHA
+        run: |
+          echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -100,13 +116,14 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and Push Docker Image
+      - name: Build & Push Docker Image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/attendance-api:latest
-            ${{ secrets.DOCKER_USERNAME }}/attendance-api:${{ github.sha }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.run_number }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.SHORT_SHA }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
