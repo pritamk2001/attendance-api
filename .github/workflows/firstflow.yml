@@ -55,7 +55,6 @@ jobs:
           else
             echo "Status : FAILED ❌" >> gitleaks-report.txt
             echo "Secrets Found : $COUNT" >> gitleaks-report.txt
-
             echo "" >> gitleaks-report.txt
 
             jq -r '
@@ -79,12 +78,7 @@ jobs:
 
           curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
             -F 'payload_json={
-            "content":"**Credential Scan Report**
-
-            Repository: ${{ github.repository }}
-            Branch: ${{ github.ref_name }}
-            Triggered By: ${{ github.actor }}
-            Status: '"${STATUS}"'"
+              "content":"**Credential Scan Report**\n\nRepository: '"${{ github.repository }}"'\nBranch: '"${{ github.ref_name }}"'\nTriggered By: '"${{ github.actor }}"'\nStatus: '"${STATUS}"'"
             }' \
             -F "file=@gitleaks-report.txt"
 
@@ -103,9 +97,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Extract Short SHA
+      - name: Generate Image Tags
         run: |
           echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          echo "TIMESTAMP=$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -122,8 +117,8 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.run_number }}
-            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.SHORT_SHA }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.TIMESTAMP }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.TIMESTAMP }}-${{ env.SHORT_SHA }}
             ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
