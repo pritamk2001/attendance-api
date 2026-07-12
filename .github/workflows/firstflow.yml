@@ -1,4 +1,4 @@
-name: Credential Scanning
+name: Credential Scanning & Docker Build
 
 on:
   push:
@@ -7,8 +7,13 @@ on:
   pull_request:
 
 jobs:
-  credential-scan:
+  ci-pipeline:
+    name: Build & Security Scan Pipeline
     runs-on: ubuntu-latest
+    
+    outputs:
+      scan_status: ${{ steps.scan_status.outputs.status }}
+      build_status: ${{ steps.build_status.outputs.status }}
 
     steps:
       - name: Checkout Repository
@@ -21,6 +26,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # 3. Determine Scan Status
+      - name: Determine Scan Status
+        id: scan_status
+        run: |
+          if [ "${{ steps.gitleaks.outcome }}" = "failure" ]; then
+            echo "status=FAILED" >> $GITHUB_OUTPUT
+          else
+            echo "status=PASSED" >> $GITHUB_OUTPUT
+          fi
+
+      # 4. Upload SARIF Report (Agar failure ho ya success, hamesha chalega)
       - name: Upload SARIF Report
         if: always()
         uses: actions/upload-artifact@v4
@@ -32,7 +48,7 @@ jobs:
         if: always()
         run: |
           echo "====================================================" > gitleaks-report.txt
-          echo "           GITLEAKS CREDENTIAL SCAN REPORT" >> gitleaks-report.txt
+          echo "          GITLEAKS CREDENTIAL SCAN REPORT" >> gitleaks-report.txt
           echo "====================================================" >> gitleaks-report.txt
           echo "" >> gitleaks-report.txt
           echo "Repository : ${{ github.repository }}" >> gitleaks-report.txt
@@ -45,58 +61,125 @@ jobs:
           echo "Generated  : $(date -u)" >> gitleaks-report.txt
           echo "" >> gitleaks-report.txt
 
-          COUNT=$(jq '[.runs[].results[]] | length' results.sarif)
-
-          echo "====================================================" >> gitleaks-report.txt
-          echo "SCAN SUMMARY" >> gitleaks-report.txt
-          echo "====================================================" >> gitleaks-report.txt
-
-          if [ "$COUNT" -eq 0 ]; then
-            echo "Status              : PASSED ✅" >> gitleaks-report.txt
-            echo "Secrets Found       : 0" >> gitleaks-report.txt
-            echo "" >> gitleaks-report.txt
-            echo "No credentials or secrets were detected." >> gitleaks-report.txt
+          if [ "${{ steps.gitleaks.outcome }}" = "failure" ]; then
+            echo "Status : FAILED ❌" >> gitleaks-report.txt
           else
-            echo "Status              : FAILED ❌" >> gitleaks-report.txt
-            echo "Secrets Found       : $COUNT" >> gitleaks-report.txt
-            echo "" >> gitleaks-report.txt
-
-            echo "====================================================" >> gitleaks-report.txt
-            echo "LEAK DETAILS" >> gitleaks-report.txt
-            echo "====================================================" >> gitleaks-report.txt
-
-            jq -r '
-            .runs[].results[] |
-            "Rule        : \(.ruleId)\nFile        : \(.locations[0].physicalLocation.artifactLocation.uri)\nLine        : \(.locations[0].physicalLocation.region.startLine)\nMessage     : \(.message.text)\n----------------------------------------------------"
-            ' results.sarif >> gitleaks-report.txt
-
-            echo "" >> gitleaks-report.txt
-            echo "====================================================" >> gitleaks-report.txt
-            echo "RECOMMENDATION" >> gitleaks-report.txt
-            echo "====================================================" >> gitleaks-report.txt
-            echo "1. Remove the exposed secret from the repository." >> gitleaks-report.txt
-            echo "2. Rotate the leaked credentials immediately." >> gitleaks-report.txt
-            echo "3. Rewrite Git history if the secret was committed." >> gitleaks-report.txt
-            echo "4. Push the updated code after verification." >> gitleaks-report.txt
+            echo "Status : PASSED ✅" >> gitleaks-report.txt
           fi
 
-      - name: Send Discord Notification
+          echo "" >> gitleaks-report.txt
+          echo "==================== LEAK DETAILS ====================" >> gitleaks-report.txt
+
+          if command -v jq >/dev/null && [ -f results.sarif ]; then
+            jq -r '
+            .runs[].results[]? |
+            "Rule      : \(.ruleId)
+File      : \(.locations[0].physicalLocation.artifactLocation.uri)
+Line      : \(.locations[0].physicalLocation.region.startLine)
+Message   : \(.message.text)
+------------------------------------------------------"
+            ' results.sarif >> gitleaks-report.txt || true
+          fi
+
+          echo "" >> gitleaks-report.txt
+          echo "================== RECOMMENDATION ====================" >> gitleaks-report.txt
+          echo "1. Remove committed secrets." >> gitleaks-report.txt
+          echo "2. Rotate exposed credentials." >> gitleaks-report.txt
+          echo "3. Rewrite Git history if required." >> gitleaks-report.txt
+          echo "4. Re-run the scan before merging." >> gitleaks-report.txt
+
+      # 6. Upload Text Report Artifact (Taaki isko hum notification job me access kar sakein)
+      - name: Upload Text Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-text-report
+          path: gitleaks-report.txt
+
+      # 7. Set up Docker Buildx (Sirf tab chalega agar Gitleaks pass hua ho)
+      - name: Set up Docker Buildx
+        if: steps.gitleaks.outcome != 'failure'
+        uses: docker/setup-buildx-action@v3
+
+      # 8. Login to Docker Hub (Sirf tab chalega agar Gitleaks pass hua ho)
+      - name: Login to Docker Hub
+        if: steps.gitleaks.outcome != 'failure'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # 9. Build and Push Docker Image (Sirf tab chalega agar Gitleaks pass hua ho)
+      - name: Build and Push Docker Image
+        id: docker_build
+        if: steps.gitleaks.outcome != 'failure'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/attendance-api:latest
+            ${{ secrets.DOCKER_USERNAME }}/attendance-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 10. Determine Build Status
+      - name: Determine Build Status
+        id: build_status
         if: always()
         run: |
-          STATUS=" PASSED"
-
-          if grep -q '"ruleId"' results.sarif; then
-            STATUS=" FAILED"
+          if [ "${{ steps.docker_build.outcome }}" = "failure" ]; then
+            echo "status=FAILED" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.docker_build.outcome }}" = "skipped" ]; then
+            echo "status=SKIPPED (Due to Secret Leak)" >> $GITHUB_OUTPUT
+          else
+            echo "status=PASSED" >> $GITHUB_OUTPUT
           fi
 
-          curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
-            -F 'payload_json={
-              "content":"**Credential Scan Report**\n\nRepository: '"${{ github.repository }}"'\nBranch: '"${{ github.ref_name }}"'\nTriggered By: '"${{ github.actor }}"'\nCommit: '"${{ github.sha }}"'\nStatus: '"${STATUS}"'\n📦 Detailed Gitleaks report."
-            }' \
-            -F "file=@gitleaks-report.txt"
-
-      - name: Fail Workflow if Leaks Found
-        if: steps.gitleaks.outcome == 'failure'
+      # 11. Workflow ko fail karna agar Gitleaks ya Docker me se koi bhi fail hua ho
+      - name: Check Final Status & Fail if needed
+        if: always()
         run: |
-          echo " Secrets detected by Gitleaks."
-          exit 1
+          if [ "${{ steps.gitleaks.outcome }}" = "failure" ] || [ "${{ steps.docker_build.outcome }}" = "failure" ]; then
+            echo "❌ Pipeline failed due to secrets detection or build failure."
+            exit 1
+          fi
+
+  notify:
+    name: Send Discord Notification
+    needs: ci-pipeline
+    runs-on: ubuntu-latest
+    if: always() # Yeh job hamesha chalegi, chahe pehli job pass ho ya fail
+
+    steps:
+      # Download text report file from previous job
+      - name: Download Text Report Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gitleaks-text-report
+
+      - name: Send Discord Notification
+        run: |
+          SCAN_STATUS="${{ needs.ci-pipeline.outputs.scan_status }}"
+          BUILD_STATUS="${{ needs.ci-pipeline.outputs.build_status }}"
+          
+          # Emoji lagane ke liye conditions
+          [ "$SCAN_STATUS" = "FAILED" ] && SCAN_EMOJI="❌" || SCAN_EMOJI="✅"
+          
+          if [ "$BUILD_STATUS" = "FAILED" ]; then
+            BUILD_EMOJI="❌"
+          elif [[ "$BUILD_STATUS" == *"SKIPPED"* ]]; then
+            BUILD_EMOJI="⚠️"
+          else
+            BUILD_EMOJI="✅"
+          fi
+
+          cat > payload.json <<EOF
+          {
+            "content": "🚀 **Workflow Notification Alert**\n\n**Repository:** ${{ github.repository }}\n**Branch:** ${{ github.ref_name }}\n**Triggered By:** ${{ github.actor }}\n**Commit:** ${{ github.sha }}\n\n🔒 **Credential Scan:** ${SCAN_EMOJI} ${SCAN_STATUS}\n📦 **Docker Build & Push:** ${BUILD_EMOJI} ${BUILD_STATUS}\n\n📄 Human-readable report attached.\n🔗 Run Link: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+          EOF
+
+          curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+            -F "payload_json=<payload.json" \
+            -F "file=@gitleaks-report.txt"
