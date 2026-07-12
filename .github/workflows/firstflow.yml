@@ -4,10 +4,19 @@ on:
   push:
     branches:
       - main
+
   pull_request:
 
+  workflow_dispatch:
+    inputs:
+      docker_repo:
+        description: "Docker Repository Name"
+        required: true
+        type: string
+        default: "vm-process"
+
 env:
-  IMAGE_NAME: ${{ github.event.repository.name }}
+  IMAGE_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.docker_repo || github.event.repository.name }}
 
 jobs:
   credential-scan:
@@ -118,7 +127,5 @@ jobs:
           push: true
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.TIMESTAMP }}
-            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.TIMESTAMP }}-${{ env.SHORT_SHA }}
-            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
