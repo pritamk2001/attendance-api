@@ -1,4 +1,4 @@
-name: Credential Scanning & Docker Build
+name: Credential Scanning, Trivy Scan & Docker Build
 
 on:
   push:
@@ -12,14 +12,18 @@ on:
       docker_repo:
         description: "Docker Repository Name"
         required: true
-        type: string
         default: "vm-process"
+        type: string
 
 env:
   DEFAULT_IMAGE_NAME: vm-process
 
 jobs:
+# -------------------------------------------------------------
+# GITLEAKS SCAN
+# -------------------------------------------------------------
   credential-scan:
+    name: Credential Scan
     runs-on: ubuntu-latest
 
     steps:
@@ -33,7 +37,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload SARIF Report
+      - name: Upload Gitleaks SARIF Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -54,7 +58,7 @@ jobs:
           echo "Workflow   : ${{ github.workflow }}" >> gitleaks-report.txt
           echo "Run Number : ${{ github.run_number }}" >> gitleaks-report.txt
           echo "Generated  : $(date -u)" >> gitleaks-report.txt
-          echo ""
+          echo "" >> gitleaks-report.txt
 
           COUNT=$(jq '[.runs[].results[]] | length' results.sarif)
 
@@ -76,7 +80,14 @@ jobs:
             ' results.sarif >> gitleaks-report.txt
           fi
 
-      - name: Send Discord Notification
+      - name: Upload Readable Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-readable-report
+          path: gitleaks-report.txt
+
+      - name: Discord Notification
         if: always()
         run: |
           STATUS="PASSED"
@@ -91,27 +102,33 @@ jobs:
             }' \
             -F "file=@gitleaks-report.txt"
 
-      - name: Fail Workflow if Leaks Found
+      - name: Fail Workflow if Secrets Found
         if: steps.gitleaks.outcome == 'failure'
         run: |
-          echo "Secrets detected by Gitleaks."
+          echo "Secrets detected."
           exit 1
 
+# -------------------------------------------------------------
+# DOCKER BUILD + TRIVY + PUSH
+# -------------------------------------------------------------
   docker-build-push:
-    name: Build & Push Docker Image
+    name: Docker Build, Trivy Scan & Push
     needs: credential-scan
     runs-on: ubuntu-latest
+
+    permissions:
+      security-events: write
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Generate Image Tags
+      - name: Generate Image Tag
         run: |
           echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
           echo "TIMESTAMP=$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
 
-      - name: Set Docker Repository Name
+      - name: Set Docker Repository
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "IMAGE_NAME=${{ github.event.inputs.docker_repo }}" >> $GITHUB_ENV
@@ -119,16 +136,64 @@ jobs:
             echo "IMAGE_NAME=${{ env.DEFAULT_IMAGE_NAME }}" >> $GITHUB_ENV
           fi
 
-      - name: Set up Docker Buildx
+      - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
+      - name: Login DockerHub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build & Push Docker Image
+      # Build locally
+      - name: Build Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.TIMESTAMP }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Trivy Scan
+      - name: Run Trivy Scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.TIMESTAMP }}
+          format: table
+          exit-code: 1
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+
+      # Generate SARIF
+      - name: Generate Trivy SARIF
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.TIMESTAMP }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+
+      - name: Upload Trivy Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-results
+          path: trivy-results.sarif
+
+      - name: Upload Trivy SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+      # Push only if Trivy passed
+      - name: Push Docker Image
+        if: success()
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -137,3 +202,12 @@ jobs:
             ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.TIMESTAMP }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Discord Notification
+        if: success()
+        run: |
+          curl -H "Content-Type: application/json" \
+          -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+          -d '{
+            "content":"✅ Docker Image Built, Trivy Scan Passed and Image Pushed Successfully.\nRepository: ${{ github.repository }}\nImage: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.TIMESTAMP }}"
+          }'
