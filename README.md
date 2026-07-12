@@ -1,8 +1,3 @@
-
-```env
-AWS_ACCESS_KEY_ID=AKIAQWERTYUIOPASDFGH
-AWS_SECRET_ACCESS_KEY=AbCdEfGhIjKlMnOpQrStUvWxYz1234567890ABCD
-```
 <p align="center">
   <img src="./static/attendance-api-logo.svg" height="280" width="280">
 </p>
