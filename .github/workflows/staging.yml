@@ -1,78 +1,266 @@
-name: Staging Deployment
+name: Container Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      registry:
+        required: true
+        type: string
+      image_repository:
+        required: true
+        type: string
+      image_tag_prefix:
+        required: false
+        type: string
+        default: ""
+      django_env:
+        required: false
+        type: string
+        default: STAGING
+      docker_context:
+        required: false
+        type: string
+        default: .
+      dockerfile:
+        required: false
+        type: string
+        default: Dockerfile
+      max_image_layers:
+        required: false
+        type: number
+        default: 35
+      max_image_size_mb:
+        required: false
+        type: number
+        default: 3500
+      push_image:
+        required: false
+        type: boolean
+        default: false
+
+    secrets:
+      registry_username:
+        required: false
+      registry_password:
+        required: false
+      discord_webhook:
+        required: false
+
+    outputs:
+      image_tag:
+        value: ${{ jobs.container_pipeline.outputs.image_tag }}
+      image_ref:
+        value: ${{ jobs.container_pipeline.outputs.image_ref }}
+      image_latest_ref:
+        value: ${{ jobs.container_pipeline.outputs.image_latest_ref }}
 
 permissions:
   contents: read
 
-on:
-  workflow_dispatch:
-    inputs:
-      deploy_to_eks:
-        description: "Deploy to EKS after Docker push"
-        required: false
-        default: false
-        type: boolean
-  # Enable this again when you want automatic staging deployment on every push.
-  # push:
-  #   branches:
-  #     - staging
-  #
-  # Enable this again when you want CI validation on staging pull requests.
-  # pull_request:
-  #   branches:
-  #     - staging
-
 jobs:
-  # trigger-integration-tests:
-  #   name: Staging Unit Tests
-  #   uses: ./.github/workflows/integration-tests.yml
-  #   with:
-  #     DB_NAME: ${{ vars.STAGING_DB_NAME }}
-  #     DB_USER: ${{ vars.STAGING_DB_USER }}
-  #     DB_HOST: ${{ vars.STAGING_CREDFLOW_API_SERVER }}
-  #     DB_PORT: ${{ vars.STAGING_DB_PORT }}
-  #   secrets:
-  #     DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
-  #     DISCORD_CI_BUILDS_URL: ${{ secrets.DISCORD_CI_BUILDS_URL }}
-
   container_pipeline:
-    name: Staging Container Pipeline
-    #needs: [trigger-integration-tests]
-    #if: ${{ always() }}
-    uses: ./.github/workflows/container-pipeline.yml
-    with:
-      registry: docker.io
-      image_repository: ${{ vars.DOCKERHUB_IMAGE_REPOSITORY }}
-      image_tag_prefix: staging
-      django_env: STAGING
-      docker_context: .
-      dockerfile: Dockerfile
-      max_image_layers: 35
-      max_image_size_mb: 3500
-      push_image: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
-    secrets:
-      registry_username: ${{ secrets.DOCKERHUB_USERNAME }}
-      registry_password: ${{ secrets.DOCKERHUB_TOKEN }}
-      discord_webhook: ${{ secrets.discord_webhook }}
+    name: Container Pipeline
+    # runs-on: [self-hosted, linux, x64, aws]
+    runs-on: ubuntu-latest
 
-  # deploy:
-  #   name: Staging Deploy To EKS
-  #   needs: [container_pipeline]
-  #   if: ${{ needs.container_pipeline.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_to_eks)) }}
-  #   uses: ./.github/workflows/deploy-eks.yml
-  #   with:
-  #     aws_region: ${{ vars.AWS_REGION }}
-  #     aws_role_to_assume: ${{ vars.STAGING_GITHUB_ACTIONS_AWS_ROLE_ARN }}
-  #     eks_cluster_name: ${{ vars.STAGING_EKS_CLUSTER_NAME }}
-  #     kubernetes_namespace: ${{ vars.STAGING_KUBERNETES_NAMESPACE }}
-  #     manifest_dir: deploy/eks/staging
-  #     docker_image: docker.io/${{ vars.DOCKERHUB_IMAGE_REPOSITORY }}:${{ needs.container_pipeline.outputs.image_tag }}
-  #     image_pull_secret_name: ooru-registry-regcred
-  #     api_deployment_name: credflow-api
-  #     api_container_name: api
-  #     celery_enabled: true
-  #     celery_deployment_name: celery-api
-  #     celery_container_name: celery
-  #   secrets:
-  #     dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
-  #     dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
-  #     discord_webhook: ${{ secrets.DISCORD_STAGING_BUILDS_URL }}
+    # Switch back to GitHub-hosted build later by commenting the line above and
+    # uncommenting the line below.
+    # runs-on: ubuntu-latest
+
+    outputs:
+      image_tag: ${{ steps.image_meta.outputs.image_tag }}
+      image_ref: ${{ steps.image_meta.outputs.image_ref }}
+      image_latest_ref: ${{ steps.image_meta.outputs.image_latest_ref }}
+
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.discord_webhook }}
+      LOCAL_IMAGE_NAME: credflow-api-ci
+
+    steps:
+      # Keep Discord notifications commented for now.
+      # - name: Discord pipeline triggered alert
+      #   if: ${{ env.DISCORD_WEBHOOK != '' }}
+      #   run: |
+      #     MESSAGE="Credflow container pipeline triggered for ${GITHUB_REF_NAME}. Commit: ${GITHUB_SHA::12}. Link: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+      #     curl -X POST \
+      #       -H "Content-Type: application/json" \
+      #       -d "{\"content\":\"${MESSAGE}\"}" \
+      #       "$DISCORD_WEBHOOK"
+
+      - name: Image Cleanup Step
+        run: |
+          docker image prune -af || true
+          docker builder prune -af || true
+
+      - name: clone_repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Gitleaks
+        run: |
+          VERSION="8.24.3"
+          curl -sSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          tar -xzf gitleaks.tar.gz
+          chmod +x gitleaks
+          sudo mv gitleaks /usr/local/bin/
+
+      - name: Gitleaks Scan
+        id: gitleaks
+        continue-on-error: true
+        run: |
+          gitleaks git \
+            --log-opts="-1" \
+            --redact \
+            --report-format sarif \
+            --report-path gitleaks-report.sarif \
+            --exit-code 1
+
+      - name: Upload Gitleaks Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.sarif
+
+
+      - name: External Clone Configration
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch --all --tags --prune
+
+      - name: Set image metadata
+        id: image_meta
+        run: |
+          SHORT_SHA="${GITHUB_SHA::12}"
+
+          if [ -n "${{ inputs.image_tag_prefix }}" ]; then
+            IMAGE_TAG="${{ inputs.image_tag_prefix }}-${SHORT_SHA}"
+            IMAGE_LATEST_TAG="${{ inputs.image_tag_prefix }}-latest"
+          else
+            IMAGE_TAG="${SHORT_SHA}"
+            IMAGE_LATEST_TAG="latest"
+          fi
+
+          IMAGE_REF="${{ inputs.registry }}/${{ inputs.image_repository }}:${IMAGE_TAG}"
+          IMAGE_LATEST_REF="${{ inputs.registry }}/${{ inputs.image_repository }}:${IMAGE_LATEST_TAG}"
+
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "image_ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+          echo "image_latest_ref=$IMAGE_LATEST_REF" >> "$GITHUB_OUTPUT"
+
+      # - name: Set up Python
+      #   uses: actions/setup-python@v5
+      #   with:
+      #     python-version: "3.12"
+      #     cache: pip
+      #     cache-dependency-path: requirements.txt
+
+      # - name: Install CI tooling
+      #   run: |
+      #     python -m pip install --upgrade pip
+      #     pip install -r requirements.txt
+      #     pip install pre-commit
+
+      # Existing repo content contains many detect-secrets hits, so keep this
+      # disabled until the repository has a baseline or the findings are cleaned up.
+      # - name: Cred Scanning Nr
+      #   run: pre-commit run detect-secrets --all-files
+
+      # - name: pre hook
+      #   env:
+      #     SKIP: detect-secrets
+      #   run: pre-commit run --all-files --show-diff-on-failure
+
+      - name: build_image
+        run: |
+          docker build \
+            --build-arg DJANGO_ENV=${{ inputs.django_env }} \
+            -f "${{ inputs.dockerfile }}" \
+            -t "${LOCAL_IMAGE_NAME}:${{ steps.image_meta.outputs.image_tag }}" \
+            -t "${{ steps.image_meta.outputs.image_ref }}" \
+            -t "${{ steps.image_meta.outputs.image_latest_ref }}" \
+            "${{ inputs.docker_context }}"
+
+      - name: Trivy Vulnerability Scan
+        id: trivy_vuln
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
+          format: table
+          exit-code: "0"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+          scanners: vuln
+
+      - name: Trivy Secret Scan
+        id: trivy_secret
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          scanners: secret
+
+      - name: Registry Login
+        if: ${{ inputs.push_image }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.registry_username }}
+          password: ${{ secrets.registry_password }}
+
+      - name: push_image
+        if: ${{ inputs.push_image }}
+        run: |
+          docker push "${{ steps.image_meta.outputs.image_ref }}"
+          docker push "${{ steps.image_meta.outputs.image_latest_ref }}"
+
+      - name: Image Cleanup Step Nr
+        if: always()
+        run: |
+          docker image rm "${LOCAL_IMAGE_NAME}:${{ steps.image_meta.outputs.image_tag }}" || true
+          docker image rm "${{ steps.image_meta.outputs.image_ref }}" || true
+          docker image rm "${{ steps.image_meta.outputs.image_latest_ref }}" || true
+          docker image prune -af || true
+          docker builder prune -af || true
+
+      - name: Discord Failure Notification
+        if: failure() && env.DISCORD_WEBHOOK != ''
+        run: |
+          FAILED_STEP="Unknown"
+
+          if [ "${{ steps.gitleaks.outcome }}" = "failure" ]; then
+            FAILED_STEP="Gitleaks Secret Scan"
+          elif [ "${{ steps.trivy_vuln.outcome }}" = "failure" ]; then
+            FAILED_STEP="Trivy Vulnerability Scan"
+          elif [ "${{ steps.trivy_secret.outcome }}" = "failure" ]; then
+            FAILED_STEP="Trivy Secret Scan"
+          fi
+
+          curl -H "Content-Type: application/json" \
+            -d "{
+              \"content\":\"❌ **Container Pipeline Failed**\n\n**Repository:** ${{ github.repository }}\n**Branch:** ${{ github.ref_name }}\n**Failed Stage:** ${FAILED_STEP}\n\n**Run:**\nhttps://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\n\n**Artifacts:**\n- gitleaks-report\n- trivy-vulnerability-report\n- trivy-secret-report\"
+            }" \
+            "$DISCORD_WEBHOOK"
+
+      - name: post hook
+        if: always()
+        run: |
+          {
+            echo "## Container pipeline summary"
+            echo ""
+            echo "- Status: ${{ job.status }}"
+            echo "- Image tag: ${{ steps.image_meta.outputs.image_tag }}"
+            echo "- Image ref: ${{ steps.image_ref }}"
+            echo "- Latest convenience tag: ${{ steps.image_latest_ref }}"
+            echo "- Push enabled: ${{ inputs.push_image }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail Pipeline if Gitleaks Found Secrets
+        if: steps.gitleaks.outcome == 'failure'
+        run: |
+          echo "❌ Gitleaks detected secrets."
+          exit 1
