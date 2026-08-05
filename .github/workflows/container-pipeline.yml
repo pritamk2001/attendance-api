@@ -110,19 +110,45 @@ jobs:
         id: gitleaks
         continue-on-error: true
         run: |
+          set +e
+
           gitleaks git \
             --log-opts="-1" \
             --redact \
-            --report-format sarif \
-            --report-path gitleaks-report.sarif \
+            --report-format json \
+            --report-path gitleaks-report.json \
             --exit-code 1
+
+          EXIT_CODE=$?
+
+          {
+            echo "=================================================="
+            echo "           GITLEAKS CREDENTIAL SCAN REPORT"
+            echo "=================================================="
+            echo
+            echo "Repository : ${{ github.repository }}"
+            echo "Branch     : ${{ github.ref_name }}"
+            echo "Commit     : ${{ github.sha }}"
+            echo "Run        : https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo "=================================================="
+            echo
+
+            if [ -s gitleaks-report.json ]; then
+              cat gitleaks-report.json
+            else
+              echo "No secrets found."
+            fi
+          } > gitleaks-report.txt
+
+          exit $EXIT_CODE
 
       - name: Upload Gitleaks Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gitleaks-report
-          path: gitleaks-report.sarif
+          path: gitleaks-report.txt
 
       - name: External Clone Configration
         run: |
