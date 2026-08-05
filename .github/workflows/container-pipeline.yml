@@ -183,7 +183,6 @@ jobs:
             "${{ inputs.docker_context }}"
 
       - name: Trivy Vulnerability Scan
-        id: trivy_vuln
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
@@ -194,7 +193,6 @@ jobs:
           scanners: vuln
 
       - name: Trivy Secret Scan
-        id: trivy_secret
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
@@ -269,14 +267,14 @@ jobs:
 
           MESSAGE=$(cat <<EOF
           {
-            "content": "❌ **Container Pipeline Failed**\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nFailed Stage: ${FAILED_STEP}\nCommit: ${{ github.sha }}\n\nRun:\nhttps://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            "content": "❌ **Container Pipeline Failed**\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nFailed Stage: ${FAILED_STEP}\nCommit: ${{ github.sha }}\n\nRun:\nhttps://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\n\nReports:\n- gitleaks-report\n- trivy-vulnerability-report\n- trivy-secret-report"
           }
           EOF
           )
 
           curl -H "Content-Type: application/json" \
-               -d "$MESSAGE" \
-               "$DISCORD_WEBHOOK"
+            -d "$MESSAGE" \
+            "$DISCORD_WEBHOOK"
 
       # Keep Discord notifications commented for now.
       # - name: discord-alert
