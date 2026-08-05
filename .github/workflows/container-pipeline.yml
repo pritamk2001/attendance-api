@@ -99,22 +99,30 @@ jobs:
 
       - name: Install Gitleaks
         run: |
-         VERSION="8.24.3"
-         curl -sSL -o gitleaks.tar.gz \
-         "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
-         tar -xzf gitleaks.tar.gz
-         chmod +x gitleaks
-         sudo mv gitleaks /usr/local/bin/
-         gitleaks version
+          VERSION="8.24.3"
+          curl -sSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          tar -xzf gitleaks.tar.gz
+          chmod +x gitleaks
+          sudo mv gitleaks /usr/local/bin/
 
       - name: Gitleaks Scan (Latest Commit Only)
+        id: gitleaks
         run: |
-         echo "Scanning latest commit only..."
-         gitleaks git \
-         --log-opts="-1" \
-         --redact \
-         --verbose \
-         --exit-code 1
+          echo "Scanning latest commit only..."
+          gitleaks git \
+            --log-opts="-1" \
+            --redact \
+            --report-format json \
+            --report-path gitleaks-report.json \
+            --exit-code 1
+
+      - name: Upload Gitleaks Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
 
       - name: External Clone Configration
         run: |
@@ -141,18 +149,18 @@ jobs:
           echo "image_ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
           echo "image_latest_ref=$IMAGE_LATEST_REF" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: requirements.txt
+      # - name: Set up Python
+      #   uses: actions/setup-python@v5
+      #   with:
+      #     python-version: "3.12"
+      #     cache: pip
+      #     cache-dependency-path: requirements.txt
 
-      - name: Install CI tooling
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pre-commit
+      # - name: Install CI tooling
+      #   run: |
+      #     python -m pip install --upgrade pip
+      #     pip install -r requirements.txt
+      #     pip install pre-commit
 
       # Existing repo content contains many detect-secrets hits, so keep this
       # disabled until the repository has a baseline or the findings are cleaned up.
@@ -175,6 +183,7 @@ jobs:
             "${{ inputs.docker_context }}"
 
       - name: Trivy Vulnerability Scan
+        id: trivy_vuln
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
@@ -185,6 +194,7 @@ jobs:
           scanners: vuln
 
       - name: Trivy Secret Scan
+        id: trivy_secret
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
@@ -244,6 +254,29 @@ jobs:
           docker image rm "${{ steps.image_meta.outputs.image_latest_ref }}" || true
           docker image prune -af || true
           docker builder prune -af || true
+
+      - name: Discord Failure Notification
+        if: failure() && env.DISCORD_WEBHOOK != ''
+        run: |
+          FAILED_STEP="Unknown"
+          if [ "${{ steps.gitleaks.outcome }}" = "failure" ]; then
+            FAILED_STEP="Gitleaks Secret Scan"
+          elif [ "${{ steps.trivy_vuln.outcome }}" = "failure" ]; then
+            FAILED_STEP="Trivy Vulnerability Scan"
+          elif [ "${{ steps.trivy_secret.outcome }}" = "failure" ]; then
+            FAILED_STEP="Trivy Secret Scan"
+          fi
+
+          MESSAGE=$(cat <<EOF
+          {
+            "content": "❌ **Container Pipeline Failed**\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nFailed Stage: ${FAILED_STEP}\nCommit: ${{ github.sha }}\n\nRun:\nhttps://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+          EOF
+          )
+
+          curl -H "Content-Type: application/json" \
+               -d "$MESSAGE" \
+               "$DISCORD_WEBHOOK"
 
       # Keep Discord notifications commented for now.
       # - name: discord-alert
