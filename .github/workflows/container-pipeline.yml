@@ -38,7 +38,7 @@ on:
         type: boolean
         default: false
       fail_on_gitleaks:
-        required: false
+        required: true
         type: boolean
         default: true
 
