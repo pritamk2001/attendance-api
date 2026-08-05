@@ -36,8 +36,8 @@ jobs:
 
   container_pipeline:
     name: Staging Container Pipeline
-    needs: [trigger-integration-tests]
-    if: ${{ always() }}
+    #needs: [trigger-integration-tests]
+    #if: ${{ always() }}
     uses: ./.github/workflows/container-pipeline.yml
     with:
       registry: docker.io
