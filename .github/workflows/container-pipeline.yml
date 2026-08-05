@@ -117,24 +117,12 @@ jobs:
             --report-path gitleaks-report.sarif \
             --exit-code 1
 
-      - name: Debug Gitleaks Report
-        if: always()
-        run: |
-          pwd
-          ls -lah
-          if [ -f gitleaks-report.sarif ]; then
-            echo "✅ Report exists"
-          else
-            echo "❌ Report not found"
-          fi
-
       - name: Upload Gitleaks Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gitleaks-report
           path: gitleaks-report.sarif
-
 
       - name: External Clone Configration
         run: |
@@ -238,23 +226,18 @@ jobs:
           docker image prune -af || true
           docker builder prune -af || true
 
-      - name: Discord Failure Notification
-        if: failure() && env.DISCORD_WEBHOOK != ''
+      - name: Send Gitleaks Report to Discord
+        if: always() && steps.gitleaks.outcome == 'failure' && env.DISCORD_WEBHOOK != ''
         run: |
-          FAILED_STEP="Unknown"
+          curl \
+            -F "content=❌ **Container Pipeline Failed**
 
-          if [ "${{ steps.gitleaks.outcome }}" = "failure" ]; then
-            FAILED_STEP="Gitleaks Secret Scan"
-          elif [ "${{ steps.trivy_vuln.outcome }}" = "failure" ]; then
-            FAILED_STEP="Trivy Vulnerability Scan"
-          elif [ "${{ steps.trivy_secret.outcome }}" = "failure" ]; then
-            FAILED_STEP="Trivy Secret Scan"
-          fi
+          Repository: ${{ github.repository }}
+          Branch: ${{ github.ref_name }}
 
-          curl -H "Content-Type: application/json" \
-            -d "{
-              \"content\":\"❌ **Container Pipeline Failed**\n\n**Repository:** ${{ github.repository }}\n**Branch:** ${{ github.ref_name }}\n**Failed Stage:** ${FAILED_STEP}\n\n**Run:**\nhttps://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\n\n**Artifacts:**\n- gitleaks-report\n- trivy-vulnerability-report\n- trivy-secret-report\"
-            }" \
+          Run:
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            -F "file=@gitleaks-report.sarif" \
             "$DISCORD_WEBHOOK"
 
       - name: Fail Pipeline if Gitleaks Found Secrets
@@ -262,3 +245,16 @@ jobs:
         run: |
           echo "❌ Gitleaks detected secrets."
           exit 1
+
+      - name: post hook
+        if: always()
+        run: |
+          {
+            echo "## Container pipeline summary"
+            echo ""
+            echo "- Status: ${{ job.status }}"
+            echo "- Image tag: ${{ steps.image_meta.outputs.image_tag }}"
+            echo "- Image ref: ${{ steps.image_meta.outputs.image_ref }}"
+            echo "- Latest convenience tag: ${{ steps.image_meta.outputs.image_latest_ref }}"
+            echo "- Push enabled: ${{ inputs.push_image }}"
+          } >> "$GITHUB_STEP_SUMMARY"
