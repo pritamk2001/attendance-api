@@ -37,6 +37,10 @@ on:
         required: false
         type: boolean
         default: false
+      fail_on_gitleaks:
+        required: false
+        type: boolean
+        default: false
 
     secrets:
       registry_username:
@@ -162,7 +166,11 @@ jobs:
             else
               echo "GITLEAKS_STATUS=FAILED" >> $GITHUB_ENV
             fi
+            if [ "${{ inputs.fail_on_gitleaks }}" = "true" ]; then
+            exit $EXIT_CODE
+            else
             exit 0
+            fi
 
       - name: Upload Gitleaks Report
         if: always()
