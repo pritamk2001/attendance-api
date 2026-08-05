@@ -129,15 +129,31 @@ jobs:
             echo "Repository : ${{ github.repository }}"
             echo "Branch     : ${{ github.ref_name }}"
             echo "Commit     : ${{ github.sha }}"
-            echo "Run        : https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            echo
-            echo "=================================================="
+            echo "Generated  : $(date -u)"
             echo
 
-            if [ -s gitleaks-report.json ]; then
-              cat gitleaks-report.json
+            if [ ! -s gitleaks-report.json ]; then
+              echo "Status : PASSED ✅"
+              echo "Secrets Found : 0"
             else
-              echo "No secrets found."
+              COUNT=$(jq length gitleaks-report.json)
+
+              echo "Status : FAILED ❌"
+              echo "Secrets Found : $COUNT"
+              echo
+              echo "=================================================="
+
+              jq -r '
+                .[] |
+                "Rule        : \(.RuleID)\n" +
+                "File        : \(.File)\n" +
+                "Line        : \(.StartLine)\n" +
+                "Description : \(.Description)\n" +
+                "Commit      : \(.Commit)\n" +
+                "Author      : \(.Author)\n" +
+                "Date        : \(.Date)\n" +
+                "-----------------------------------------------"
+              ' gitleaks-report.json
             fi
           } > gitleaks-report.txt
 
@@ -255,7 +271,7 @@ jobs:
       - name: Send Gitleaks Report to Discord
         if: always() && steps.gitleaks.outcome == 'failure' && env.DISCORD_WEBHOOK != ''
         run: |
-          if [ -f "gitleaks-report.json" ]; then
+          if [ -f "gitleaks-report.txt" ]; then
             curl \
               -F "content=❌ **Container Pipeline Failed**
 
@@ -264,7 +280,7 @@ jobs:
 
           Run:
           https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-              -F "file=@gitleaks-report.json" \
+              -F "file=@gitleaks-report.txt" \
               "$DISCORD_WEBHOOK"
           else
             curl \
