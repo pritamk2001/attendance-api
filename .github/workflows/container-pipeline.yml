@@ -1,0 +1,258 @@
+name: Container Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      registry:
+        required: true
+        type: string
+      image_repository:
+        required: true
+        type: string
+      image_tag_prefix:
+        required: false
+        type: string
+        default: ""
+      django_env:
+        required: false
+        type: string
+        default: STAGING
+      docker_context:
+        required: false
+        type: string
+        default: .
+      dockerfile:
+        required: false
+        type: string
+        default: Dockerfile
+      max_image_layers:
+        required: false
+        type: number
+        default: 35
+      max_image_size_mb:
+        required: false
+        type: number
+        default: 3500
+      push_image:
+        required: false
+        type: boolean
+        default: false
+
+    secrets:
+      registry_username:
+        required: false
+      registry_password:
+        required: false
+      discord_webhook:
+        required: false
+
+    outputs:
+      image_tag:
+        value: ${{ jobs.container_pipeline.outputs.image_tag }}
+      image_ref:
+        value: ${{ jobs.container_pipeline.outputs.image_ref }}
+      image_latest_ref:
+        value: ${{ jobs.container_pipeline.outputs.image_latest_ref }}
+
+permissions:
+  contents: read
+
+jobs:
+  container_pipeline:
+    name: Container Pipeline
+    runs-on: [self-hosted, linux, x64, aws]
+
+    # Switch back to GitHub-hosted build later by commenting the line above and
+    # uncommenting the line below.
+    # runs-on: ubuntu-latest
+
+    outputs:
+      image_tag: ${{ steps.image_meta.outputs.image_tag }}
+      image_ref: ${{ steps.image_meta.outputs.image_ref }}
+      image_latest_ref: ${{ steps.image_meta.outputs.image_latest_ref }}
+
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.discord_webhook }}
+      LOCAL_IMAGE_NAME: credflow-api-ci
+
+    steps:
+      # Keep Discord notifications commented for now.
+      # - name: Discord pipeline triggered alert
+      #   if: ${{ env.DISCORD_WEBHOOK != '' }}
+      #   run: |
+      #     MESSAGE="Credflow container pipeline triggered for ${GITHUB_REF_NAME}. Commit: ${GITHUB_SHA::12}. Link: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+      #     curl -X POST \
+      #       -H "Content-Type: application/json" \
+      #       -d "{\"content\":\"${MESSAGE}\"}" \
+      #       "$DISCORD_WEBHOOK"
+
+      - name: Image Cleanup Step
+        run: |
+          docker image prune -af || true
+          docker builder prune -af || true
+
+      - name: clone_repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks Scan (Latest Commit Only)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: git --log-opts="-1" --verbose
+
+      - name: External Clone Configration
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch --all --tags --prune
+
+      - name: Set image metadata
+        id: image_meta
+        run: |
+          SHORT_SHA="${GITHUB_SHA::12}"
+
+          if [ -n "${{ inputs.image_tag_prefix }}" ]; then
+            IMAGE_TAG="${{ inputs.image_tag_prefix }}-${SHORT_SHA}"
+            IMAGE_LATEST_TAG="${{ inputs.image_tag_prefix }}-latest"
+          else
+            IMAGE_TAG="${SHORT_SHA}"
+            IMAGE_LATEST_TAG="latest"
+          fi
+
+          IMAGE_REF="${{ inputs.registry }}/${{ inputs.image_repository }}:${IMAGE_TAG}"
+          IMAGE_LATEST_REF="${{ inputs.registry }}/${{ inputs.image_repository }}:${IMAGE_LATEST_TAG}"
+
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "image_ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+          echo "image_latest_ref=$IMAGE_LATEST_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install CI tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pre-commit
+
+      # Existing repo content contains many detect-secrets hits, so keep this
+      # disabled until the repository has a baseline or the findings are cleaned up.
+      # - name: Cred Scanning Nr
+      #   run: pre-commit run detect-secrets --all-files
+
+      # - name: pre hook
+      #   env:
+      #     SKIP: detect-secrets
+      #   run: pre-commit run --all-files --show-diff-on-failure
+
+      - name: build_image
+        run: |
+          docker build \
+            --build-arg DJANGO_ENV=${{ inputs.django_env }} \
+            -f "${{ inputs.dockerfile }}" \
+            -t "${LOCAL_IMAGE_NAME}:${{ steps.image_meta.outputs.image_tag }}" \
+            -t "${{ steps.image_meta.outputs.image_ref }}" \
+            -t "${{ steps.image_meta.outputs.image_latest_ref }}" \
+            "${{ inputs.docker_context }}"
+
+      - name: Trivy Vulnerability Scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
+          format: table
+          exit-code: "0"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+          scanners: vuln
+
+      - name: Trivy Secret Scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          scanners: secret
+
+      # - name: Image Layer Validator Step nr
+      #   run: |
+      #     LAYER_COUNT="$(docker image inspect "${LOCAL_IMAGE_NAME}:${{ steps.image_meta.outputs.image_tag }}" --format '{{ len .RootFS.Layers }}')"
+      #     echo "Layer count: $LAYER_COUNT"
+      #
+      #     if [ "$LAYER_COUNT" -gt "${{ inputs.max_image_layers }}" ]; then
+      #       echo "::error::Image layer count $LAYER_COUNT exceeds allowed limit of ${{ inputs.max_image_layers }}."
+      #       exit 1
+      #     fi
+
+      # - name: Image Size Validator Step nr
+      #   run: |
+      #     SIZE_BYTES="$(docker image inspect "${LOCAL_IMAGE_NAME}:${{ steps.image_meta.outputs.image_tag }}" --format '{{ .Size }}')"
+      #     SIZE_MB="$((SIZE_BYTES / 1024 / 1024))"
+      #     echo "Image size: ${SIZE_MB}MB"
+      #
+      #     if [ "$SIZE_MB" -gt "${{ inputs.max_image_size_mb }}" ]; then
+      #       echo "::error::Image size ${SIZE_MB}MB exceeds allowed limit of ${{ inputs.max_image_size_mb }}MB."
+      #       exit 1
+      #     fi
+
+      # - name: Validate registry credentials
+      #   if: ${{ inputs.push_image }}
+      #   run: |
+      #     if [ -z "${{ secrets.registry_username }}" ] || [ -z "${{ secrets.registry_password }}" ]; then
+      #       echo "::error::registry_username and registry_password are required when push_image is true."
+      #       exit 1
+      #     fi
+
+      - name: Registry Login
+        if: ${{ inputs.push_image }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.registry_username }}
+          password: ${{ secrets.registry_password }}
+
+      - name: push_image
+        if: ${{ inputs.push_image }}
+        run: |
+          docker push "${{ steps.image_meta.outputs.image_ref }}"
+          docker push "${{ steps.image_meta.outputs.image_latest_ref }}"
+
+      - name: Image Cleanup Step Nr
+        if: always()
+        run: |
+          docker image rm "${LOCAL_IMAGE_NAME}:${{ steps.image_meta.outputs.image_tag }}" || true
+          docker image rm "${{ steps.image_meta.outputs.image_ref }}" || true
+          docker image rm "${{ steps.image_meta.outputs.image_latest_ref }}" || true
+          docker image prune -af || true
+          docker builder prune -af || true
+
+      # Keep Discord notifications commented for now.
+      # - name: discord-alert
+      #   if: ${{ always() && env.DISCORD_WEBHOOK != '' }}
+      #   env:
+      #     PIPELINE_STATUS: ${{ job.status }}
+      #   run: |
+      #     MESSAGE="Container pipeline for ${GITHUB_REF_NAME} finished with status ${PIPELINE_STATUS}. Image: ${{ steps.image_meta.outputs.image_ref }}. Link: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+      #     curl -X POST \
+      #       -H "Content-Type: application/json" \
+      #       -d "{\"content\":\"${MESSAGE}\"}" \
+      #       "$DISCORD_WEBHOOK"
+
+      - name: post hook
+        if: always()
+        run: |
+          {
+            echo "## Container pipeline summary"
+            echo ""
+            echo "- Status: ${{ job.status }}"
+            echo "- Image tag: ${{ steps.image_meta.outputs.image_tag }}"
+            echo "- Image ref: ${{ steps.image_meta.outputs.image_ref }}"
+            echo "- Latest convenience tag: ${{ steps.image_meta.outputs.image_latest_ref }}"
+            echo "- Push enabled: ${{ inputs.push_image }}"
+          } >> "$GITHUB_STEP_SUMMARY"
