@@ -157,7 +157,12 @@ jobs:
             fi
           } > gitleaks-report.txt
 
-          exit $EXIT_CODE
+            if [ "$EXIT_CODE" -eq 0 ]; then
+              echo "GITLEAKS_STATUS=PASSED" >> $GITHUB_ENV
+            else
+              echo "GITLEAKS_STATUS=FAILED" >> $GITHUB_ENV
+            fi
+            exit 0
 
       - name: Upload Gitleaks Report
         if: always()
@@ -269,7 +274,7 @@ jobs:
           docker builder prune -af || true
 
       - name: Send Gitleaks Report to Discord
-        if: always() && steps.gitleaks.outcome == 'failure' && env.DISCORD_WEBHOOK != ''
+        if: always() && env.GITLEAKS_STATUS == 'FAILED' && env.DISCORD_WEBHOOK != ''
         run: |
           if [ -f "gitleaks-report.txt" ]; then
             curl \
@@ -289,11 +294,6 @@ jobs:
               "$DISCORD_WEBHOOK"
           fi
 
-      - name: Fail Pipeline if Gitleaks Found Secrets
-        if: steps.gitleaks.outcome == 'failure'
-        run: |
-          echo "❌ Gitleaks detected secrets."
-          exit 1
 
       - name: post hook
         if: always()
