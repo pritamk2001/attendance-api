@@ -139,6 +139,8 @@ jobs:
             if [ ! -s gitleaks-report.json ]; then
               echo "Status : PASSED ✅"
               echo "Secrets Found : 0"
+
+              echo "status=PASSED" >> "$GITHUB_OUTPUT"
             else
               COUNT=$(jq length gitleaks-report.json)
 
@@ -158,19 +160,16 @@ jobs:
                 "Date        : \(.Date)\n" +
                 "-----------------------------------------------"
               ' gitleaks-report.json
+
+              echo "status=FAILED" >> "$GITHUB_OUTPUT"
             fi
           } > gitleaks-report.txt
 
-            if [ "$EXIT_CODE" -eq 0 ]; then
-              echo "GITLEAKS_STATUS=PASSED" >> $GITHUB_ENV
-            else
-              echo "GITLEAKS_STATUS=FAILED" >> $GITHUB_ENV
-            fi
-            if [ "${{ inputs.fail_on_gitleaks }}" = "true" ]; then
+          if [ "${{ inputs.fail_on_gitleaks }}" = "true" ]; then
             exit $EXIT_CODE
-            else
-            exit 0
-            fi
+          fi
+
+          exit 0
 
       - name: Upload Gitleaks Report
         if: always()
@@ -282,7 +281,7 @@ jobs:
           docker builder prune -af || true
 
       - name: Send Gitleaks Report to Discord
-        if: always() && env.GITLEAKS_STATUS == 'FAILED' && env.DISCORD_WEBHOOK != ''
+        if: always() && steps.gitleaks.outputs.status == 'FAILED' && env.DISCORD_WEBHOOK != ''
         run: |
           if [ -f "gitleaks-report.txt" ]; then
             curl \
@@ -298,10 +297,9 @@ jobs:
           else
             curl \
               -H "Content-Type: application/json" \
-              -d "{\"content\":\"❌ **Container Pipeline Failed**\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nRun: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+              -d "{\"content\":\"❌ **Container Pipeline Failed**\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nRun: https://github.com/${{ github.repository }}\/actions/runs/${{ github.run_id }}\"}" \
               "$DISCORD_WEBHOOK"
           fi
-
 
       - name: post hook
         if: always()
