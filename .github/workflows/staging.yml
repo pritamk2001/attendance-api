@@ -43,6 +43,7 @@ jobs:
       registry: docker.io
       image_repository: ${{ vars.DOCKERHUB_IMAGE_REPOSITORY }}
       image_tag_prefix: staging
+      fail_on_gitleaks: false
       django_env: STAGING
       docker_context: .
       dockerfile: Dockerfile
@@ -52,7 +53,7 @@ jobs:
     secrets:
       registry_username: ${{ secrets.DOCKERHUB_USERNAME }}
       registry_password: ${{ secrets.DOCKERHUB_TOKEN }}
-      discord_webhook: ${{ secrets.discord_webhook }}
+      discord_webhook: ${{ secrets.DISCORD_CI_BUILDS_URL }}
 
   # deploy:
   #   name: Staging Deploy To EKS
