@@ -52,7 +52,7 @@ jobs:
     secrets:
       registry_username: ${{ secrets.DOCKERHUB_USERNAME }}
       registry_password: ${{ secrets.DOCKERHUB_TOKEN }}
-      discord_webhook: ${{ secrets.DISCORD_CI_BUILDS_URL }}
+      discord_webhook: ${{ secrets.discord_webhook }}
 
   # deploy:
   #   name: Staging Deploy To EKS
