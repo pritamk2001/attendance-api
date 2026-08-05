@@ -117,6 +117,17 @@ jobs:
             --report-path gitleaks-report.sarif \
             --exit-code 1
 
+      - name: Debug Gitleaks Report
+        if: always()
+        run: |
+          pwd
+          ls -lah
+          if [ -f gitleaks-report.sarif ]; then
+            echo "✅ Report exists"
+          else
+            echo "❌ Report not found"
+          fi
+
       - name: Upload Gitleaks Report
         if: always()
         uses: actions/upload-artifact@v4
@@ -245,19 +256,6 @@ jobs:
               \"content\":\"❌ **Container Pipeline Failed**\n\n**Repository:** ${{ github.repository }}\n**Branch:** ${{ github.ref_name }}\n**Failed Stage:** ${FAILED_STEP}\n\n**Run:**\nhttps://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\n\n**Artifacts:**\n- gitleaks-report\n- trivy-vulnerability-report\n- trivy-secret-report\"
             }" \
             "$DISCORD_WEBHOOK"
-
-      - name: post hook
-        if: always()
-        run: |
-          {
-            echo "## Container pipeline summary"
-            echo ""
-            echo "- Status: ${{ job.status }}"
-            echo "- Image tag: ${{ steps.image_meta.outputs.image_tag }}"
-            echo "- Image ref: ${{ steps.image_ref }}"
-            echo "- Latest convenience tag: ${{ steps.image_latest_ref }}"
-            echo "- Push enabled: ${{ inputs.push_image }}"
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail Pipeline if Gitleaks Found Secrets
         if: steps.gitleaks.outcome == 'failure'
