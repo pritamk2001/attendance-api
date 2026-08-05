@@ -255,16 +255,23 @@ jobs:
       - name: Send Gitleaks Report to Discord
         if: always() && steps.gitleaks.outcome == 'failure' && env.DISCORD_WEBHOOK != ''
         run: |
-          curl \
-            -F "content=❌ **Container Pipeline Failed**
+          if [ -f "gitleaks-report.json" ]; then
+            curl \
+              -F "content=❌ **Container Pipeline Failed**
 
           Repository: ${{ github.repository }}
           Branch: ${{ github.ref_name }}
 
           Run:
           https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            -F "file=@gitleaks-report.sarif" \
-            "$DISCORD_WEBHOOK"
+              -F "file=@gitleaks-report.json" \
+              "$DISCORD_WEBHOOK"
+          else
+            curl \
+              -H "Content-Type: application/json" \
+              -d "{\"content\":\"❌ **Container Pipeline Failed**\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nRun: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+              "$DISCORD_WEBHOOK"
+          fi
 
       - name: Fail Pipeline if Gitleaks Found Secrets
         if: steps.gitleaks.outcome == 'failure'
