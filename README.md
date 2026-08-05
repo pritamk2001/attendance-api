@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="./static/attendance-api-logo.svg" height="280" width="280">
-</p>d
+
 
 Attendance REST API is a python based microservice which is responsible for all the attendance related transactions in the [OT-Microservices](https://github.com/OT-MICROSERVICES). This application supports cross-platform, the only thing will be required to run this application is python runtime modules.
 
