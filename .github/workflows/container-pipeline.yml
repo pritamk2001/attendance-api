@@ -183,6 +183,7 @@ jobs:
             "${{ inputs.docker_context }}"
 
       - name: Trivy Vulnerability Scan
+        id: trivy_vuln
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
@@ -193,6 +194,7 @@ jobs:
           scanners: vuln
 
       - name: Trivy Secret Scan
+        id: trivy_secret
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
@@ -228,6 +230,7 @@ jobs:
         if: failure() && env.DISCORD_WEBHOOK != ''
         run: |
           FAILED_STEP="Unknown"
+
           if [ "${{ steps.gitleaks.outcome }}" = "failure" ]; then
             FAILED_STEP="Gitleaks Secret Scan"
           elif [ "${{ steps.trivy_vuln.outcome }}" = "failure" ]; then
@@ -236,18 +239,11 @@ jobs:
             FAILED_STEP="Trivy Secret Scan"
           fi
 
-          MESSAGE=$(cat <<EOF
-          {
-            "content": "❌ **Container Pipeline Failed**\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nFailed Stage: ${FAILED_STEP}\nCommit: ${{ github.sha }}\n\nRun:\nhttps://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\n\nReports:\n- gitleaks-report\n- trivy-vulnerability-report\n- trivy-secret-report"
-          }
-          EOF
-          )
-
           curl -H "Content-Type: application/json" \
-            -d "$MESSAGE" \
+            -d "{
+              \"content\":\"❌ **Container Pipeline Failed**\n\n**Repository:** ${{ github.repository }}\n**Branch:** ${{ github.ref_name }}\n**Failed Stage:** ${FAILED_STEP}\n\n**Run:**\nhttps://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\n\n**Artifacts:**\n- gitleaks-report\n- trivy-vulnerability-report\n- trivy-secret-report\"
+            }" \
             "$DISCORD_WEBHOOK"
-
-
 
       - name: post hook
         if: always()
@@ -257,7 +253,7 @@ jobs:
             echo ""
             echo "- Status: ${{ job.status }}"
             echo "- Image tag: ${{ steps.image_meta.outputs.image_tag }}"
-            echo "- Image ref: ${{ steps.image_meta.outputs.image_ref }}"
-            echo "- Latest convenience tag: ${{ steps.image_meta.outputs.image_latest_ref }}"
+            echo "- Image ref: ${{ steps.image_ref }}"
+            echo "- Latest convenience tag: ${{ steps.image_latest_ref }}"
             echo "- Push enabled: ${{ inputs.push_image }}"
           } >> "$GITHUB_STEP_SUMMARY"
