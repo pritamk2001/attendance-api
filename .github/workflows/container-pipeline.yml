@@ -201,35 +201,6 @@ jobs:
           severity: CRITICAL,HIGH
           scanners: secret
 
-      # - name: Image Layer Validator Step nr
-      #   run: |
-      #     LAYER_COUNT="$(docker image inspect "${LOCAL_IMAGE_NAME}:${{ steps.image_meta.outputs.image_tag }}" --format '{{ len .RootFS.Layers }}')"
-      #     echo "Layer count: $LAYER_COUNT"
-      #
-      #     if [ "$LAYER_COUNT" -gt "${{ inputs.max_image_layers }}" ]; then
-      #       echo "::error::Image layer count $LAYER_COUNT exceeds allowed limit of ${{ inputs.max_image_layers }}."
-      #       exit 1
-      #     fi
-
-      # - name: Image Size Validator Step nr
-      #   run: |
-      #     SIZE_BYTES="$(docker image inspect "${LOCAL_IMAGE_NAME}:${{ steps.image_meta.outputs.image_tag }}" --format '{{ .Size }}')"
-      #     SIZE_MB="$((SIZE_BYTES / 1024 / 1024))"
-      #     echo "Image size: ${SIZE_MB}MB"
-      #
-      #     if [ "$SIZE_MB" -gt "${{ inputs.max_image_size_mb }}" ]; then
-      #       echo "::error::Image size ${SIZE_MB}MB exceeds allowed limit of ${{ inputs.max_image_size_mb }}MB."
-      #       exit 1
-      #     fi
-
-      # - name: Validate registry credentials
-      #   if: ${{ inputs.push_image }}
-      #   run: |
-      #     if [ -z "${{ secrets.registry_username }}" ] || [ -z "${{ secrets.registry_password }}" ]; then
-      #       echo "::error::registry_username and registry_password are required when push_image is true."
-      #       exit 1
-      #     fi
-
       - name: Registry Login
         if: ${{ inputs.push_image }}
         uses: docker/login-action@v3
@@ -276,17 +247,7 @@ jobs:
             -d "$MESSAGE" \
             "$DISCORD_WEBHOOK"
 
-      # Keep Discord notifications commented for now.
-      # - name: discord-alert
-      #   if: ${{ always() && env.DISCORD_WEBHOOK != '' }}
-      #   env:
-      #     PIPELINE_STATUS: ${{ job.status }}
-      #   run: |
-      #     MESSAGE="Container pipeline for ${GITHUB_REF_NAME} finished with status ${PIPELINE_STATUS}. Image: ${{ steps.image_meta.outputs.image_ref }}. Link: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-      #     curl -X POST \
-      #       -H "Content-Type: application/json" \
-      #       -d "{\"content\":\"${MESSAGE}\"}" \
-      #       "$DISCORD_WEBHOOK"
+
 
       - name: post hook
         if: always()
