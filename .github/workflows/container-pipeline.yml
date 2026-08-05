@@ -106,15 +106,15 @@ jobs:
           chmod +x gitleaks
           sudo mv gitleaks /usr/local/bin/
 
-      - name: Gitleaks Scan (Latest Commit Only)
+      - name: Gitleaks Scan
         id: gitleaks
+        continue-on-error: true
         run: |
-          echo "Scanning latest commit only..."
           gitleaks git \
             --log-opts="-1" \
             --redact \
-            --report-format json \
-            --report-path gitleaks-report.json \
+            --report-format sarif \
+            --report-path gitleaks-report.sarif \
             --exit-code 1
 
       - name: Upload Gitleaks Report
@@ -122,7 +122,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gitleaks-report
-          path: gitleaks-report.json
+          path: gitleaks-report.sarif
+
 
       - name: External Clone Configration
         run: |
@@ -257,3 +258,9 @@ jobs:
             echo "- Latest convenience tag: ${{ steps.image_latest_ref }}"
             echo "- Push enabled: ${{ inputs.push_image }}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail Pipeline if Gitleaks Found Secrets
+        if: steps.gitleaks.outcome == 'failure'
+        run: |
+          echo "❌ Gitleaks detected secrets."
+          exit 1
