@@ -60,11 +60,12 @@ permissions:
 jobs:
   container_pipeline:
     name: Container Pipeline
-    #runs-on: [self-hosted, linux, x64, aws]
+    # runs-on: [self-hosted, linux, x64, aws]
+    runs-on: ubuntu-latest
 
     # Switch back to GitHub-hosted build later by commenting the line above and
     # uncommenting the line below.
-    runs-on: ubuntu-latest
+    # runs-on: ubuntu-latest
 
     outputs:
       image_tag: ${{ steps.image_meta.outputs.image_tag }}
@@ -96,12 +97,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Gitleaks
+        run: |
+         curl -sSfL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz -o gitleaks.tar.gz
+         tar -xzf gitleaks.tar.gz
+         sudo mv gitleaks /usr/local/bin/
+
       - name: Gitleaks Scan (Latest Commit Only)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: git --log-opts="-1" --verbose
+        run: |
+         gitleaks git \
+         --log-opts="-1" \
+         --redact \
+         --verbose \
+         --exit-code 1
 
       - name: External Clone Configration
         run: |
