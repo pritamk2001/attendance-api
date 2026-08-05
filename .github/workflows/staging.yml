@@ -43,7 +43,6 @@ jobs:
       registry: docker.io
       image_repository: ${{ vars.DOCKERHUB_IMAGE_REPOSITORY }}
       image_tag_prefix: staging
-      fail_on_gitleaks: false
       django_env: STAGING
       docker_context: .
       dockerfile: Dockerfile
