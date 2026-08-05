@@ -99,12 +99,17 @@ jobs:
 
       - name: Install Gitleaks
         run: |
-         curl -sSfL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz -o gitleaks.tar.gz
+         VERSION="8.24.3"
+         curl -sSL -o gitleaks.tar.gz \
+         "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
          tar -xzf gitleaks.tar.gz
+         chmod +x gitleaks
          sudo mv gitleaks /usr/local/bin/
+         gitleaks version
 
       - name: Gitleaks Scan (Latest Commit Only)
         run: |
+         echo "Scanning latest commit only..."
          gitleaks git \
          --log-opts="-1" \
          --redact \
