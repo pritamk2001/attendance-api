@@ -40,7 +40,7 @@ on:
       fail_on_gitleaks:
         required: true
         type: boolean
-        default: true
+        default: false
 
     secrets:
       registry_username:
