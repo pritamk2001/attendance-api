@@ -41,7 +41,7 @@ on:
       fail_on_gitleaks:
         required: true
         type: boolean
-        default: true
+        default: false
 
     secrets:
       registry_username:
@@ -170,7 +170,11 @@ jobs:
             fi
           } > gitleaks-report.txt
 
-          exit 0
+          if [ "${{ inputs.fail_on_gitleaks }}" = "true" ]; then
+            exit $EXIT_CODE
+          else
+            exit 0
+          fi
 
       - name: Upload Gitleaks Report
         if: always()
@@ -329,7 +333,17 @@ jobs:
         if: always() && env.DISCORD_WEBHOOK != ''
         run: |
           GITLEAKS_STATUS="${{ steps.gitleaks.outputs.status }}"
-          TRIVY_STATUS="${{ steps.trivy_vuln.outcome }}"
+          if [ -f trivy-results.sarif ]; then
+            COUNT=$(jq '[.runs[].results[]] | length' trivy-results.sarif)
+
+            if [ "$COUNT" -eq 0 ]; then
+              TRIVY_STATUS="PASSED"
+            else
+              TRIVY_STATUS="FAILED"
+            fi
+          else
+            TRIVY_STATUS="UNKNOWN"
+          fi
 
           [ -z "$GITLEAKS_STATUS" ] && GITLEAKS_STATUS="UNKNOWN"
           [ -z "$TRIVY_STATUS" ] && TRIVY_STATUS="UNKNOWN"
