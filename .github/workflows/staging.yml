@@ -41,7 +41,7 @@ jobs:
     uses: ./.github/workflows/container-pipeline.yml
     with:
       registry: docker.io
-      image_repository: pritam0517/vm-test
+      image_repository: ${{ vars.DOCKERHUB_STAGING_IMAGE_REPOSITORY }}
       image_tag_prefix: staging
       django_env: STAGING
       docker_context: .
