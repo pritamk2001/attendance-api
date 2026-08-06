@@ -137,14 +137,18 @@ jobs:
             echo "Generated  : $(date -u)"
             echo
 
-            if [ ! -s gitleaks-report.json ]; then
+            COUNT=0
+
+            if [ -f gitleaks-report.json ]; then
+              COUNT=$(jq length gitleaks-report.json)
+            fi
+
+            if [ "$COUNT" -eq 0 ]; then
               echo "Status : PASSED ✅"
               echo "Secrets Found : 0"
 
               echo "status=PASSED" >> "$GITHUB_OUTPUT"
             else
-              COUNT=$(jq length gitleaks-report.json)
-
               echo "Status : FAILED ❌"
               echo "Secrets Found : $COUNT"
               echo
@@ -159,16 +163,12 @@ jobs:
                 "Commit      : \(.Commit)\n" +
                 "Author      : \(.Author)\n" +
                 "Date        : \(.Date)\n" +
-                -----------------------------------------------"
+                "-----------------------------------------------"
               ' gitleaks-report.json
 
               echo "status=FAILED" >> "$GITHUB_OUTPUT"
             fi
           } > gitleaks-report.txt
-
-          if [ "${{ inputs.fail_on_gitleaks }}" = "true" ]; then
-            exit $EXIT_CODE
-          fi
 
           exit 0
 
@@ -348,31 +348,23 @@ jobs:
           EOF
           )
 
-          if [ -f gitleaks-report.txt ] && [ -f trivy-report.txt ]; then
-            curl \
-              -F "content=${CONTENT}" \
-              -F "file1=@gitleaks-report.txt" \
-              -F "file2=@trivy-report.txt" \
-              "$DISCORD_WEBHOOK"
-
-          elif [ -f gitleaks-report.txt ]; then
-            curl \
-              -F "content=${CONTENT}" \
-              -F "file1=@gitleaks-report.txt" \
-              "$DISCORD_WEBHOOK"
-
-          elif [ -f trivy-report.txt ]; then
-            curl \
-              -F "content=${CONTENT}" \
-              -F "file1=@trivy-report.txt" \
-              "$DISCORD_WEBHOOK"
-
+          if [ "${GITLEAKS_STATUS}" = "FAILED" ] && [ -f gitleaks-report.txt ]; then
+            GITLEAKS_ARG="-F file1=@gitleaks-report.txt"
           else
-            curl \
-              -H "Content-Type: application/json" \
-              -d "{\"content\":\"${CONTENT}\"}" \
-              "$DISCORD_WEBHOOK"
+            GITLEAKS_ARG=""
           fi
+
+          if [ -f trivy-report.txt ]; then
+            TRIVY_ARG="-F file2=@trivy-report.txt"
+          else
+            TRIVY_ARG=""
+          fi
+
+          eval curl \
+            -F "content=${CONTENT}" \
+            ${GITLEAKS_ARG} \
+            ${TRIVY_ARG} \
+            "$DISCORD_WEBHOOK"
 
       - name: post hook
         if: always()
