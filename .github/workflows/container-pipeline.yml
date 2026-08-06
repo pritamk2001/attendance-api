@@ -112,7 +112,7 @@ jobs:
 
       - name: Gitleaks Scan
         id: gitleaks
-        continue-on-error: true
+        continue-on-error: ${{ !inputs.fail_on_gitleaks }}
         run: |
           set +e
 
