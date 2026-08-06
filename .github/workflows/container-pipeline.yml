@@ -9,6 +9,7 @@ on:
       image_repository:
         required: true
         type: string
+        default: pritam0517/vm-test
       image_tag_prefix:
         required: false
         type: string
