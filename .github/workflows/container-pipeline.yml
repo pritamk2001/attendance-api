@@ -338,33 +338,31 @@ jobs:
           🔒 **Container Security Scan Report**
 
           Repository : ${{ github.repository }}
-          Branch : ${{ github.ref_name }}
+          Branch     : ${{ github.ref_name }}
 
           Gitleaks : ${GITLEAKS_STATUS}
-          Trivy : ${TRIVY_STATUS}
+          Trivy    : ${TRIVY_STATUS}
 
           Run:
           https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EOF
           )
 
-          if [ "${GITLEAKS_STATUS}" = "FAILED" ] && [ -f gitleaks-report.txt ]; then
-            GITLEAKS_ARG="-F file1=@gitleaks-report.txt"
-          else
-            GITLEAKS_ARG=""
+          CURL_ARGS=(
+            -F "content=${CONTENT}"
+          )
+
+          # Attach Gitleaks report only when FAILED
+          if [ "$GITLEAKS_STATUS" = "FAILED" ] && [ -f gitleaks-report.txt ]; then
+            CURL_ARGS+=(-F "file1=@gitleaks-report.txt")
           fi
 
+          # Always attach Trivy report (remove this if you also want only on failure)
           if [ -f trivy-report.txt ]; then
-            TRIVY_ARG="-F file2=@trivy-report.txt"
-          else
-            TRIVY_ARG=""
+            CURL_ARGS+=(-F "file2=@trivy-report.txt")
           fi
 
-          eval curl \
-            -F "content=${CONTENT}" \
-            ${GITLEAKS_ARG} \
-            ${TRIVY_ARG} \
-            "$DISCORD_WEBHOOK"
+          curl "${CURL_ARGS[@]}" "$DISCORD_WEBHOOK"
 
       - name: post hook
         if: always()
