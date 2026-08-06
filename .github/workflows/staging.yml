@@ -41,7 +41,7 @@ jobs:
     uses: ./.github/workflows/container-pipeline.yml
     with:
       registry: docker.io
-      image_repository: ${{ vars.DOCKERHUB_IMAGE_REPOSITORY }}
+      image_repository: ${{ vars.image_repository }}
       image_tag_prefix: staging
       django_env: STAGING
       docker_context: .
