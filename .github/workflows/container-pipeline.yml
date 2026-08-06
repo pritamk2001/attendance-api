@@ -159,7 +159,7 @@ jobs:
                 "Commit      : \(.Commit)\n" +
                 "Author      : \(.Author)\n" +
                 "Date        : \(.Date)\n" +
-                "-----------------------------------------------"
+                -----------------------------------------------"
               ' gitleaks-report.json
 
               echo "status=FAILED" >> "$GITHUB_OUTPUT"
@@ -264,35 +264,35 @@ jobs:
         if: always()
         run: |
           {
-          echo "===================================================="
-          echo "                 TRIVY SCAN REPORT"
-          echo "===================================================="
-          echo
-          echo "Repository : ${{ github.repository }}"
-          echo "Branch     : ${{ github.ref_name }}"
-          echo "Image      : ${{ steps.image_meta.outputs.image_ref }}"
-          echo "Generated  : $(date -u)"
-          echo
+            echo "===================================================="
+            echo "                 TRIVY SCAN REPORT"
+            echo "===================================================="
+            echo
+            echo "Repository : ${{ github.repository }}"
+            echo "Branch     : ${{ github.ref_name }}"
+            echo "Image      : ${{ steps.image_meta.outputs.image_ref }}"
+            echo "Generated  : $(date -u)"
+            echo
 
-          if [ -f trivy-results.sarif ]; then
-            COUNT=$(jq '[.runs[].results[]] | length' trivy-results.sarif)
+            if [ -f trivy-results.sarif ]; then
+              COUNT=$(jq '[.runs[].results[]] | length' trivy-results.sarif)
 
-            if [ "$COUNT" -eq 0 ]; then
-              echo "Status : PASSED ✅"
-              echo "High/Critical Vulnerabilities : 0"
+              if [ "$COUNT" -eq 0 ]; then
+                echo "Status : PASSED ✅"
+                echo "High/Critical Vulnerabilities : 0"
+              else
+                echo "Status : FAILED ❌"
+                echo "High/Critical Vulnerabilities : $COUNT"
+                echo
+
+                jq -r '
+                .runs[].results[] |
+                "Severity : \(.level)\nRule : \(.ruleId)\nMessage : \(.message.text)\n------------------------------------------"
+                ' trivy-results.sarif
+              fi
             else
-              echo "Status : FAILED ❌"
-              echo "High/Critical Vulnerabilities : $COUNT"
-              echo
-
-            jq -r '
-            .runs[].results[] |
-            "Severity : \(.level)\nRule : \(.ruleId)\nMessage : \(.message.text)\n------------------------------------------"
-            ' trivy-results.sarif
+              echo "Trivy report not generated."
             fi
-          else
-            echo "Trivy report not generated."
-          fi
           } > trivy-report.txt
 
       - name: Upload Trivy Report
@@ -334,18 +334,8 @@ jobs:
           [ -z "$GITLEAKS_STATUS" ] && GITLEAKS_STATUS="UNKNOWN"
           [ -z "$TRIVY_STATUS" ] && TRIVY_STATUS="UNKNOWN"
 
-          FILES=""
-
-          if [ -f "gitleaks-report.txt" ]; then
-            FILES="$FILES -F file1=@gitleaks-report.txt"
-          fi
-
-          if [ -f "trivy-report.txt" ]; then
-            FILES="$FILES -F file2=@trivy-report.txt"
-          fi
-
-          eval curl \
-            -F "content=🔒 **Container Security Scan Report**
+          CONTENT=$(cat <<EOF
+          🔒 **Container Security Scan Report**
 
           Repository : ${{ github.repository }}
           Branch : ${{ github.ref_name }}
@@ -354,9 +344,35 @@ jobs:
           Trivy : ${TRIVY_STATUS}
 
           Run:
-          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            $FILES \
-            "$DISCORD_WEBHOOK"
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+          )
+
+          if [ -f gitleaks-report.txt ] && [ -f trivy-report.txt ]; then
+            curl \
+              -F "content=${CONTENT}" \
+              -F "file1=@gitleaks-report.txt" \
+              -F "file2=@trivy-report.txt" \
+              "$DISCORD_WEBHOOK"
+
+          elif [ -f gitleaks-report.txt ]; then
+            curl \
+              -F "content=${CONTENT}" \
+              -F "file1=@gitleaks-report.txt" \
+              "$DISCORD_WEBHOOK"
+
+          elif [ -f trivy-report.txt ]; then
+            curl \
+              -F "content=${CONTENT}" \
+              -F "file1=@trivy-report.txt" \
+              "$DISCORD_WEBHOOK"
+
+          else
+            curl \
+              -H "Content-Type: application/json" \
+              -d "{\"content\":\"${CONTENT}\"}" \
+              "$DISCORD_WEBHOOK"
+          fi
 
       - name: post hook
         if: always()
