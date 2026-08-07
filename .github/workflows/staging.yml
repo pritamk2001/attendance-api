@@ -13,8 +13,8 @@ on:
         type: boolean
   # Enable this again when you want automatic staging deployment on every push.
   push:
-     branches:
-       - test
+     tags:
+       - "v*"
   #
   # Enable this again when you want CI validation on staging pull requests.
   # pull_request:
@@ -42,7 +42,6 @@ jobs:
     with:
       registry: docker.io
       image_repository: ${{ vars.DOCKERHUB_STAGING_IMAGE_REPOSITORY }}
-      image_tag_prefix: staging
       django_env: STAGING
       docker_context: .
       dockerfile: Dockerfile
