@@ -173,10 +173,10 @@ jobs:
           name: gitleaks-report
           path: gitleaks-report.txt
 
-      - name: External Clone Configration
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git fetch --all --tags --prune
+      # - name: External Clone Configration
+      #   run: |
+      #     git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      #     git fetch --all --tags --prune
 
       - name: Set image metadata
         id: image_meta
