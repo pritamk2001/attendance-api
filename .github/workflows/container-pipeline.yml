@@ -82,6 +82,16 @@ jobs:
       LOCAL_IMAGE_NAME: credflow-api-ci
 
     steps:
+      # Keep Discord notifications commented for now.
+      # - name: Discord pipeline triggered alert
+      #   if: ${{ env.DISCORD_WEBHOOK != '' }}
+      #   run: |
+      #     MESSAGE="Credflow container pipeline triggered for ${GITHUB_REF_NAME}. Commit: ${GITHUB_SHA::12}. Link: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+      #     curl -X POST \
+      #       -H "Content-Type: application/json" \
+      #       -d "{\"content\":\"${MESSAGE}\"}" \
+      #       "$DISCORD_WEBHOOK"
+
       - name: Image Cleanup Step
         run: |
           docker image prune -af || true
@@ -173,26 +183,23 @@ jobs:
           name: gitleaks-report
           path: gitleaks-report.txt
 
-      # - name: External Clone Configration
-      #   run: |
-      #     git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      #     git fetch --all --tags --prune
+      - name: External Clone Configration
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch --all --tags --prune
 
       - name: Set image metadata
         id: image_meta
         run: |
           SHORT_SHA="${GITHUB_SHA::12}"
-          # If workflow is triggered by a Git tag,
-          # use the Git tag as the Docker image tag.
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            IMAGE_TAG="${GITHUB_REF_NAME}"
-          elif [ -n "${{ inputs.image_tag_prefix }}" ]; then
+
+          if [ -n "${{ inputs.image_tag_prefix }}" ]; then
             IMAGE_TAG="${{ inputs.image_tag_prefix }}-${SHORT_SHA}"
+            IMAGE_LATEST_TAG="${{ inputs.image_tag_prefix }}-latest"
           else
             IMAGE_TAG="${SHORT_SHA}"
+            IMAGE_LATEST_TAG="latest"
           fi
-
-          IMAGE_LATEST_TAG="latest"
 
           IMAGE_REF="${{ inputs.registry }}/${{ inputs.image_repository }}:${IMAGE_TAG}"
           IMAGE_LATEST_REF="${{ inputs.registry }}/${{ inputs.image_repository }}:${IMAGE_LATEST_TAG}"
@@ -200,6 +207,29 @@ jobs:
           echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
           echo "image_ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
           echo "image_latest_ref=$IMAGE_LATEST_REF" >> "$GITHUB_OUTPUT"
+
+      # - name: Set up Python
+      #   uses: actions/setup-python@v5
+      #   with:
+      #     python-version: "3.12"
+      #     cache: pip
+      #     cache-dependency-path: requirements.txt
+
+      # - name: Install CI tooling
+      #   run: |
+      #     python -m pip install --upgrade pip
+      #     pip install -r requirements.txt
+      #     pip install pre-commit
+
+      # Existing repo content contains many detect-secrets hits, so keep this
+      # disabled until the repository has a baseline or the findings are cleaned up.
+      # - name: Cred Scanning Nr
+      #   run: pre-commit run detect-secrets --all-files
+
+      # - name: pre hook
+      #   env:
+      #     SKIP: detect-secrets
+      #   run: pre-commit run --all-files --show-diff-on-failure
 
       - name: build_image
         run: |
