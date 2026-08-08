@@ -106,13 +106,23 @@ jobs:
         continue-on-error: ${{ !inputs.fail_on_gitleaks }}
         run: |
           set +e
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)
 
-          gitleaks detect \
-            --source . \
-            --redact \
-            --report-format json \
-            --report-path gitleaks-report.json \
-            --exit-code 1
+          if [ -z "$PREVIOUS_TAG" ]; then
+            echo "No previous tag found. Cannot determine release commit range."
+            exit 1
+          fi
+
+          echo "Previous tag : $PREVIOUS_TAG"
+          echo "Current tag  : $GITHUB_REF_NAME"
+          echo "Scan range   : ${PREVIOUS_TAG}..${GITHUB_SHA}"
+
+          gitleaks git \
+             --log-opts="${PREVIOUS_TAG}..${GITHUB_SHA}" \
+             --redact \
+             --report-format json \
+             --report-path gitleaks-report.json \
+             --exit-code 1
 
           EXIT_CODE=$?
 
