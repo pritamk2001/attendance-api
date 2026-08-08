@@ -10,7 +10,7 @@ import psycopg2
 from models.message import CustomMessage, HealthMessage
 from models.user_info import EmployeeInfo
 from client.redis import MiddlewareSDKFacade
-
+ghp_dummy1234567890abcdef1234567890abcdef12
 CONFIG_FILE = os.getenv('CONFIG_FILE', 'config.yaml')
 
 class CorePostgresClient:

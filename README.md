@@ -14,7 +14,8 @@ Supported features of the application are:-
 ## Pre-Requisites
 hshsk
 The attendance api application have some database and package manager dependencies. Some of them are mandatory and some can be option, for example - Redis. To run the application successfully, we need these things configured:
-
+AWS_ACCESS_KEY_ID=AKIAQWERTYUIOPASDFGH
+AWS_SECRET_ACCESS_KEY=YxP3mN9vQa8LzRt5Kc2WdEfGhJkLmNoPqRsTuVwX
 - [PostgresSQL](https://www.postgresql.org/)
 - [Redis](https://redis.io/)
 - [Poetry](https://python-poetry.org/)
