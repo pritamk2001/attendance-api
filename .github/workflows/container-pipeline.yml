@@ -107,8 +107,8 @@ jobs:
         run: |
           set +e
 
-          gitleaks git \
-            --log-opts="${{ github.event.before }}..${{ github.sha }}" \
+          gitleaks detect \
+            --source . \
             --redact \
             --report-format json \
             --report-path gitleaks-report.json \
