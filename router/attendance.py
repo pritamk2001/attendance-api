@@ -13,6 +13,7 @@ from voluptuous import Schema, Required
 from client.postgres import DatabaseSDKFacade
 from utils.validator import data_validator
 from router.cache import cache
+ghs_dummy1234567890abcdef1234567890abcdef12
 
 route = Blueprint("attendance", __name__)
 

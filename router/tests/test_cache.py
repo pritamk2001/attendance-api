@@ -12,6 +12,7 @@ def app():
     app.config['CACHE_TYPE'] = 'simple'
     cache.init_app(app)
     return app
+ghs_dummy1234567890abcdef1234567890abcdef12
 
 def test_cache_set_get(app):
     # Set a value in the cache
