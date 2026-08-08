@@ -13,7 +13,7 @@ def test_get_caching_data(mock_open):
         port: 6379
         password: mypassword
     """
-
+ghs_dummy1234567890abcdef1234567890abcdef12
     mock_open.return_value = mock_file
     os.environ['CONFIG_FILE'] = 'config.yaml'
 
