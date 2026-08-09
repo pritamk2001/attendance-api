@@ -42,6 +42,10 @@ on:
         required: true
         type: boolean
         default: false
+      fail_on_trivy:
+        required: false
+        type: boolean
+        default: false
 
     secrets:
       registry_username:
@@ -80,6 +84,7 @@ jobs:
     env:
       DISCORD_WEBHOOK: ${{ secrets.discord_webhook }}
       LOCAL_IMAGE_NAME: credflow-api-ci
+      TRIVY_CACHE_DIR: ${{ github.workspace }}/.cache/trivy
 
     steps:
       - name: Image Cleanup Step
@@ -223,7 +228,7 @@ jobs:
 
       - name: Trivy Vulnerability Scan
         id: trivy_vuln
-        continue-on-error: true
+        continue-on-error: ${{ !inputs.fail_on_trivy }}
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
@@ -236,6 +241,7 @@ jobs:
 
       - name: Trivy Secret Scan
         id: trivy_secret
+        continue-on-error: ${{ !inputs.fail_on_trivy }}
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
@@ -245,8 +251,11 @@ jobs:
           scanners: secret
 
       - name: Generate Trivy Report
+        id: trivy_report
         if: always()
         run: |
+          STATUS="UNKNOWN"
+
           {
             echo "===================================================="
             echo "                 TRIVY SCAN REPORT"
@@ -262,9 +271,13 @@ jobs:
               COUNT=$(jq '[.runs[].results[]] | length' trivy-results.sarif)
 
               if [ "$COUNT" -eq 0 ]; then
+                STATUS="PASSED"
+
                 echo "Status : PASSED ✅"
                 echo "High/Critical Vulnerabilities : 0"
               else
+                STATUS="FAILED"
+
                 echo "Status : FAILED ❌"
                 echo "High/Critical Vulnerabilities : $COUNT"
                 echo
@@ -278,6 +291,8 @@ jobs:
               echo "Trivy report not generated."
             fi
           } > trivy-report.txt
+
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
 
       - name: Upload Trivy Report
         if: always()
@@ -313,18 +328,7 @@ jobs:
         if: always() && env.DISCORD_WEBHOOK != ''
         run: |
           GITLEAKS_STATUS="${{ steps.gitleaks.outputs.status }}"
-          if [ -f trivy-results.sarif ]; then
-            COUNT=$(jq '[.runs[].results[]] | length' trivy-results.sarif)
-
-            if [ "$COUNT" -eq 0 ]; then
-              TRIVY_STATUS="PASSED"
-            else
-              TRIVY_STATUS="FAILED"
-            fi
-          else
-            TRIVY_STATUS="UNKNOWN"
-          fi
-
+          TRIVY_STATUS="${{ steps.trivy_report.outputs.status }}"
           [ -z "$GITLEAKS_STATUS" ] && GITLEAKS_STATUS="UNKNOWN"
           [ -z "$TRIVY_STATUS" ] && TRIVY_STATUS="UNKNOWN"
 
@@ -351,8 +355,8 @@ jobs:
             CURL_ARGS+=(-F "file1=@gitleaks-report.txt")
           fi
 
-          # Always attach Trivy report (remove this if you also want only on failure)
-          if [ -f trivy-report.txt ]; then
+          # Attach Trivy report only when FAILED
+          if [ "$TRIVY_STATUS" != "UNKNOWN" ] && [ -f trivy-report.txt ]; then
             CURL_ARGS+=(-F "file2=@trivy-report.txt")
           fi
 
