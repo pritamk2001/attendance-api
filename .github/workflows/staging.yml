@@ -49,7 +49,8 @@ jobs:
       django_env: STAGING
       docker_context: .
       dockerfile: Dockerfile
-      fail_on_gitleaks: true  # fail the build on gitleaks 
+      fail_on_gitleaks: true  # fail the build on gitleaks
+      fail_on_trivy: true      # fail the build on trivy
       max_image_layers: 35
       max_image_size_mb: 3500
       push_image: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
