@@ -6,7 +6,7 @@ Module for all the application routes and their respective handlers
 - get_detail_healthcheck
 - get_healthcheck
 """
-
+tstes
 # pylint: disable=import-error,invalid-name,redefined-builtin
 from flask import Blueprint, jsonify, request
 from voluptuous import Schema, Required
