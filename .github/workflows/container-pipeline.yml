@@ -228,7 +228,7 @@ jobs:
 
       - name: Trivy Vulnerability Scan
         id: trivy_vuln
-        continue-on-error: true
+        continue-on-error: ${{ !inputs.fail_on_trivy }}
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
