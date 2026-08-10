@@ -85,7 +85,7 @@ jobs:
           🚀 **Deployment Started**
           Repository : ${{ github.repository }}
           Branch/Tag : ${{ github.ref_name }}
-          Trigger    : ${{ github.event_name }}
+          Trigger    : ${{ github.event_name == 'workflow_dispatch' && 'Manual' || 'Auto' }}
           Commit     : ${{ github.sha }}
           Container pipeline has started.
           Run:
