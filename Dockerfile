@@ -1,5 +1,10 @@
-#FROM alpine:latest
-#CMD ["echo", "Hello from Docker!"]
+
+#FROM alpine:3.10
+#CMD ["echo", "Testing Alpine EOL version warning"]
 FROM alpine:3.10
 
-CMD ["echo", "Testing Alpine EOL version warning"]
+RUN apk update && \
+    apk add --no-cache \
+    libssl1.1
+
+CMD ["echo", "Testing Trivy vulnerability"]
