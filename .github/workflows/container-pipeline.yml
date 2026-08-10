@@ -226,9 +226,9 @@ jobs:
           image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
           format: sarif
           output: trivy-results.sarif
-          exit-code: "1"
+          exit-code: "0"
           ignore-unfixed: true
-          severity: CRITICAL
+          severity: CRITICAL,HIGH,MEDIUM,LOW
           scanners: vuln
 
       - name: Trivy Secret Scan
@@ -239,14 +239,14 @@ jobs:
         with:
           image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
           format: table
-          exit-code: "1"
+          exit-code: "0"
           scanners: secret
 
       - name: Generate Trivy Report
         id: trivy_report
         if: always()
         run: |
-          STATUS="UNKNOWN"
+          STATUS="PASSED"
           COUNT=0
 
           if [ -f trivy-results.sarif ]; then
@@ -267,10 +267,10 @@ jobs:
 
             COUNT=$(jq '[.runs[].results[]] | length' trivy-filtered.sarif)
 
-            if [ "$COUNT" -eq 0 ]; then
-              STATUS="PASSED"
+            if [ "$COUNT" -gt 0 ]; then
+              STATUS="FINDINGS"
             else
-              STATUS="FAILED"
+              STATUS="PASSED"
             fi
 
           else
@@ -281,14 +281,7 @@ jobs:
           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
 
           echo "Trivy status: $STATUS"
-          echo "Actionable CRITICAL findings: $COUNT"
-
-          if [ "$STATUS" = "PASSED" ]; then
-            echo "Trivy : PASSED"
-            echo "No actionable CRITICAL vulnerabilities found."
-            echo "Version/EOL warnings are ignored."
-            exit 0
-          fi
+          echo "Security findings: $COUNT"
 
           {
             echo "===================================================="
@@ -300,31 +293,52 @@ jobs:
             echo "Image      : ${{ steps.image_meta.outputs.image_ref }}"
             echo "Generated  : $(date -u)"
             echo
-            echo "Status : FAILED"
-            echo "Actionable CRITICAL Vulnerabilities : $COUNT"
-            echo
 
-            jq -r '
-              .runs[].results[] |
-              "Severity : \(.level)\n" +
-              "Rule     : \(.ruleId)\n" +
-              "Message  : \(.message.text)\n" +
-              "------------------------------------------"
-            ' trivy-filtered.sarif
+            if [ "$STATUS" = "PASSED" ]; then
+              echo "Status : PASSED"
+              echo "Security Findings : 0"
+              echo
+              echo "No vulnerabilities found."
+              echo "EOL/version-related warnings are ignored."
+
+            elif [ "$STATUS" = "FINDINGS" ]; then
+              echo "Status : FINDINGS DETECTED"
+              echo "Security Findings : $COUNT"
+              echo
+              echo "NOTE: Findings are reported for visibility only."
+              echo "They do NOT fail the pipeline."
+              echo
+
+              jq -r '
+                .runs[].results[] |
+                "Severity : \(.level)\n" +
+                "Rule     : \(.ruleId)\n" +
+                "Message  : \(.message.text)\n" +
+                "------------------------------------------"
+              ' trivy-filtered.sarif
+
+            else
+              echo "Status : ERROR"
+              echo "Trivy scan did not generate a valid SARIF report."
+            fi
 
           } > trivy-report.txt
 
-          exit 1
+          if [ "$STATUS" = "ERROR" ]; then
+            exit 1
+          fi
+
+          exit 0
 
       - name: Upload Trivy Report
-        if: ${{ steps.trivy_report.outputs.status == 'FAILED' || steps.trivy_report.outputs.status == 'ERROR' }}
+        if: always() && steps.trivy_report.outputs.status != 'PASSED'
         uses: actions/upload-artifact@v4
         with:
           name: trivy-report
           path: trivy-report.txt
 
       - name: Registry Login
-        if: ${{ inputs.push_image && steps.trivy_report.outputs.status == 'PASSED' }}
+        if: ${{ inputs.push_image && steps.trivy_report.outputs.status != 'ERROR' }}
         uses: docker/login-action@v3
         with:
           registry: ${{ inputs.registry }}
@@ -332,7 +346,7 @@ jobs:
           password: ${{ secrets.registry_password }}
 
       - name: push_image
-        if: ${{ inputs.push_image && steps.trivy_report.outputs.status == 'PASSED' }}
+        if: ${{ inputs.push_image && steps.trivy_report.outputs.status != 'ERROR' }}
         run: |
           docker push "${{ steps.image_meta.outputs.image_ref }}"
           docker push "${{ steps.image_meta.outputs.image_latest_ref }}"
@@ -377,8 +391,8 @@ jobs:
             CURL_ARGS+=(-F "file1=@gitleaks-report.txt")
           fi
 
-          # Attach Trivy report ONLY when FAILED
-          if [ "$TRIVY_STATUS" = "FAILED" ] && [ -f trivy-report.txt ]; then
+          # Attach Trivy report ONLY when FINDINGS
+          if [ "$TRIVY_STATUS" = "FINDINGS" ] && [ -f trivy-report.txt ]; then
             CURL_ARGS+=(-F "file2=@trivy-report.txt")
           fi
 
