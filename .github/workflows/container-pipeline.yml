@@ -397,11 +397,29 @@ jobs:
           username: ${{ secrets.registry_username }}
           password: ${{ secrets.registry_password }}
 
-      - name: push_image
+      - name: Push Image
+        id: push_image
         if: ${{ inputs.push_image && steps.trivy_report.outputs.status == 'PASSED' }}
         run: |
           docker push "${{ steps.image_meta.outputs.image_ref }}"
           docker push "${{ steps.image_meta.outputs.image_latest_ref }}"
+
+      - name: Send Image Push Failed Alert
+        if: failure() && steps.push_image.outcome == 'failure' && env.DISCORD_WEBHOOK != ''
+        run: |
+          CONTENT=$(cat <<EOF
+          ❌ **Image Push Failed**
+          Repository : ${{ github.repository }}
+          Branch/Tag : ${{ github.ref_name }}
+          Image      : ${{ steps.image_meta.outputs.image_ref }}
+          Docker Hub image push failed.
+          Run:
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+          )
+          curl \
+          -F "content=${CONTENT}" \
+          "$DISCORD_WEBHOOK"
 
       - name: Image Cleanup Step Nr
         if: always()
