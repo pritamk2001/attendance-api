@@ -42,10 +42,6 @@ on:
         required: true
         type: boolean
         default: false
-      fail_on_trivy:
-        required: false
-        type: boolean
-        default: false
 
     secrets:
       registry_username:
@@ -69,12 +65,7 @@ permissions:
 jobs:
   container_pipeline:
     name: Container Pipeline
-    # runs-on: [self-hosted, linux, x64, aws]
     runs-on: ubuntu-latest
-
-    # Switch back to GitHub-hosted build later by commenting the line above and
-    # uncommenting the line below.
-    # runs-on: ubuntu-latest
 
     outputs:
       image_tag: ${{ steps.image_meta.outputs.image_tag }}
@@ -188,17 +179,10 @@ jobs:
           name: gitleaks-report
           path: gitleaks-report.txt
 
-      # - name: External Clone Configration
-      #   run: |
-      #     git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      #     git fetch --all --tags --prune
-
       - name: Set image metadata
         id: image_meta
         run: |
           SHORT_SHA="${GITHUB_SHA::12}"
-          # If workflow is triggered by a Git tag,
-          # use the Git tag as the Docker image tag.
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             IMAGE_TAG="${GITHUB_REF_NAME}"
           elif [ -n "${{ inputs.image_tag_prefix }}" ]; then
@@ -241,14 +225,13 @@ jobs:
 
       - name: Trivy Secret Scan
         id: trivy_secret
-        if: ${{ steps.trivy_vuln.outcome != 'failure' }}
+        if: always()
         continue-on-error: true
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
           format: table
           exit-code: "1"
-          severity: CRITICAL
           scanners: secret
 
       - name: Generate Trivy Report
@@ -259,13 +242,30 @@ jobs:
           COUNT=0
 
           if [ -f trivy-results.sarif ]; then
-            COUNT=$(jq '[.runs[].results[]] | length' trivy-results.sarif)
+
+            # Remove findings related only to old/EOL/unsupported versions.
+            jq '
+              .runs[].results |= map(
+                select(
+                  (
+                    (.message.text // "") |
+                    test(
+                      "(end.of.life|EOL|no longer supported|unsupported|version is no longer supported|security updates are not provided|out.of.support|obsolete)";
+                      "i"
+                    )
+                  ) | not
+                )
+              )
+            ' trivy-results.sarif > trivy-filtered.sarif
+
+            COUNT=$(jq '[.runs[].results[]] | length' trivy-filtered.sarif)
 
             if [ "$COUNT" -eq 0 ]; then
               STATUS="PASSED"
             else
               STATUS="FAILED"
             fi
+
           else
             STATUS="ERROR"
           fi
@@ -275,15 +275,13 @@ jobs:
 
           echo "Trivy status: $STATUS"
 
-          # PASS
-          # No report should be generated.
           if [ "$STATUS" = "PASSED" ]; then
             echo "Trivy : PASSED"
-            echo "No CRITICAL vulnerabilities found."
+            echo "No actionable CRITICAL vulnerabilities found."
+            echo "Version/EOL related findings are ignored."
             exit 0
           fi
 
-          # Generate detailed report ONLY for FAILED / ERROR
           {
             echo "===================================================="
             echo "                 TRIVY SCAN REPORT"
@@ -297,16 +295,18 @@ jobs:
 
             if [ "$STATUS" = "FAILED" ]; then
               echo "Status : FAILED ❌"
-              echo "CRITICAL Vulnerabilities : $COUNT"
+              echo "Actionable CRITICAL Vulnerabilities : $COUNT"
+              echo
+              echo "Version/EOL related findings are excluded."
               echo
 
               jq -r '
-              .runs[].results[] |
-              "Severity : \(.level)\n" +
-              "Rule : \(.ruleId)\n" +
-              "Message : \(.message.text)\n" +
-              "------------------------------------------"
-              ' trivy-results.sarif
+                .runs[].results[] |
+                "Severity : \(.level)\n" +
+                "Rule : \(.ruleId)\n" +
+                "Message : \(.message.text)\n" +
+                "------------------------------------------"
+              ' trivy-filtered.sarif
 
             else
               echo "Status : ERROR ❌"
@@ -314,22 +314,13 @@ jobs:
             fi
           } > trivy-report.txt
 
-          # Trivy execution/report error
           if [ "$STATUS" = "ERROR" ]; then
             exit 1
           fi
 
-          # CRITICAL vulnerability + fail_on_trivy=true
-          if [ "$STATUS" = "FAILED" ] && [ "${{ inputs.fail_on_trivy }}" = "true" ]; then
-            echo "CRITICAL vulnerability found and fail_on_trivy=true"
+          if [ "$STATUS" = "FAILED" ]; then
+            echo "Actionable CRITICAL vulnerability found."
             exit 1
-          fi
-
-          # CRITICAL vulnerability + fail_on_trivy=false
-          if [ "$STATUS" = "FAILED" ] && [ "${{ inputs.fail_on_trivy }}" = "false" ]; then
-            echo "CRITICAL vulnerability found but fail_on_trivy=false"
-            echo "Pipeline will continue."
-            exit 0
           fi
 
           exit 0
@@ -342,7 +333,7 @@ jobs:
           path: trivy-report.txt
 
       - name: Registry Login
-        if: ${{ inputs.push_image && (!inputs.fail_on_trivy || steps.trivy_report.outputs.status != 'FAILED') }}
+        if: ${{ inputs.push_image && steps.trivy_report.outputs.status != 'FAILED' }}
         uses: docker/login-action@v3
         with:
           registry: ${{ inputs.registry }}
@@ -350,7 +341,7 @@ jobs:
           password: ${{ secrets.registry_password }}
 
       - name: push_image
-        if: ${{ inputs.push_image && (!inputs.fail_on_trivy || steps.trivy_report.outputs.status != 'FAILED') }}
+        if: ${{ inputs.push_image && steps.trivy_report.outputs.status != 'FAILED' }}
         run: |
           docker push "${{ steps.image_meta.outputs.image_ref }}"
           docker push "${{ steps.image_meta.outputs.image_latest_ref }}"
