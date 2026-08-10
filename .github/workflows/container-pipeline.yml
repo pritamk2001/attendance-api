@@ -219,15 +219,34 @@ jobs:
           echo "image_ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
           echo "image_latest_ref=$IMAGE_LATEST_REF" >> "$GITHUB_OUTPUT"
 
-      - name: build_image
+      - name: Build Docker Image
+        id: build_image
         run: |
           docker build \
-            --build-arg DJANGO_ENV=${{ inputs.django_env }} \
-            -f "${{ inputs.dockerfile }}" \
-            -t "${LOCAL_IMAGE_NAME}:${{ steps.image_meta.outputs.image_tag }}" \
-            -t "${{ steps.image_meta.outputs.image_ref }}" \
-            -t "${{ steps.image_meta.outputs.image_latest_ref }}" \
-            "${{ inputs.docker_context }}"
+          --build-arg DJANGO_ENV=${{ inputs.django_env }} \
+          -f "${{ inputs.dockerfile }}" \
+          -t "${LOCAL_IMAGE_NAME}:${{ steps.image_meta.outputs.image_tag }}" \
+          -t "${{ steps.image_meta.outputs.image_ref }}" \
+          -t "${{ steps.image_meta.outputs.image_latest_ref }}" \
+          "${{ inputs.docker_context }}"
+
+      - name: Send Build Failed Alert
+        if: failure() && steps.build_image.outcome == 'failure' && env.DISCORD_WEBHOOK != ''
+        run: |
+          CONTENT=$(cat <<EOF
+          ❌ **Build Failed**
+          Repository : ${{ github.repository }}
+          Branch/Tag : ${{ github.ref_name }}
+          Image      : ${{ steps.image_meta.outputs.image_ref }}
+          Docker image build failed.
+          Run:
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+          )
+
+          curl \
+            -F "content=${CONTENT}" \
+            "$DISCORD_WEBHOOK"
 
       - name: Trivy Vulnerability Scan
         id: trivy_vuln
