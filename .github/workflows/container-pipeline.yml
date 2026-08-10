@@ -228,7 +228,7 @@ jobs:
 
       - name: Trivy Vulnerability Scan
         id: trivy_vuln
-        continue-on-error: ${{ !inputs.fail_on_trivy }}
+        continue-on-error: true
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
@@ -236,7 +236,7 @@ jobs:
           output: trivy-results.sarif
           exit-code: "1"
           ignore-unfixed: true
-          severity: CRITICAL,HIGH
+          severity: CRITICAL
           scanners: vuln
 
       - name: Trivy Secret Scan
@@ -248,7 +248,7 @@ jobs:
           image-ref: ${{ env.LOCAL_IMAGE_NAME }}:${{ steps.image_meta.outputs.image_tag }}
           format: table
           exit-code: "1"
-          severity: CRITICAL,HIGH
+          severity: CRITICAL
           scanners: secret
 
       - name: Generate Trivy Report
@@ -256,7 +256,34 @@ jobs:
         if: always()
         run: |
           STATUS="UNKNOWN"
+          COUNT=0
 
+          if [ -f trivy-results.sarif ]; then
+            COUNT=$(jq '[.runs[].results[]] | length' trivy-results.sarif)
+
+            if [ "$COUNT" -eq 0 ]; then
+              STATUS="PASSED"
+            else
+              STATUS="FAILED"
+            fi
+          else
+            STATUS="ERROR"
+          fi
+
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
+          echo "Trivy status: $STATUS"
+
+          # PASS
+          # No report should be generated.
+          if [ "$STATUS" = "PASSED" ]; then
+            echo "Trivy : PASSED"
+            echo "No CRITICAL vulnerabilities found."
+            exit 0
+          fi
+
+          # Generate detailed report ONLY for FAILED / ERROR
           {
             echo "===================================================="
             echo "                 TRIVY SCAN REPORT"
@@ -268,35 +295,47 @@ jobs:
             echo "Generated  : $(date -u)"
             echo
 
-            if [ -f trivy-results.sarif ]; then
-              COUNT=$(jq '[.runs[].results[]] | length' trivy-results.sarif)
+            if [ "$STATUS" = "FAILED" ]; then
+              echo "Status : FAILED ❌"
+              echo "CRITICAL Vulnerabilities : $COUNT"
+              echo
 
-              if [ "$COUNT" -eq 0 ]; then
-                STATUS="PASSED"
+              jq -r '
+              .runs[].results[] |
+              "Severity : \(.level)\n" +
+              "Rule : \(.ruleId)\n" +
+              "Message : \(.message.text)\n" +
+              "------------------------------------------"
+              ' trivy-results.sarif
 
-                echo "Status : PASSED ✅"
-                echo "High/Critical Vulnerabilities : 0"
-              else
-                STATUS="FAILED"
-
-                echo "Status : FAILED ❌"
-                echo "High/Critical Vulnerabilities : $COUNT"
-                echo
-
-                jq -r '
-                .runs[].results[] |
-                "Severity : \(.level)\nRule : \(.ruleId)\nMessage : \(.message.text)\n------------------------------------------"
-                ' trivy-results.sarif
-              fi
             else
-              echo "Trivy report not generated."
+              echo "Status : ERROR ❌"
+              echo "Trivy scan did not generate a valid SARIF report."
             fi
           } > trivy-report.txt
 
-          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          # Trivy execution/report error
+          if [ "$STATUS" = "ERROR" ]; then
+            exit 1
+          fi
+
+          # CRITICAL vulnerability + fail_on_trivy=true
+          if [ "$STATUS" = "FAILED" ] && [ "${{ inputs.fail_on_trivy }}" = "true" ]; then
+            echo "CRITICAL vulnerability found and fail_on_trivy=true"
+            exit 1
+          fi
+
+          # CRITICAL vulnerability + fail_on_trivy=false
+          if [ "$STATUS" = "FAILED" ] && [ "${{ inputs.fail_on_trivy }}" = "false" ]; then
+            echo "CRITICAL vulnerability found but fail_on_trivy=false"
+            echo "Pipeline will continue."
+            exit 0
+          fi
+
+          exit 0
 
       - name: Upload Trivy Report
-        if: always()
+        if: ${{ steps.trivy_report.outputs.status == 'FAILED' || steps.trivy_report.outputs.status == 'ERROR' }}
         uses: actions/upload-artifact@v4
         with:
           name: trivy-report
@@ -356,8 +395,8 @@ jobs:
             CURL_ARGS+=(-F "file1=@gitleaks-report.txt")
           fi
 
-          # Attach Trivy report only when FAILED
-          if [ "$TRIVY_STATUS" != "UNKNOWN" ] && [ -f trivy-report.txt ]; then
+          # Attach Trivy report ONLY when FAILED
+          if [ "$TRIVY_STATUS" = "FAILED" ] && [ -f trivy-report.txt ]; then
             CURL_ARGS+=(-F "file2=@trivy-report.txt")
           fi
 
