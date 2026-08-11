@@ -9,7 +9,7 @@ on:
       image_repository:
         required: true
         type: string
-        default: pritam0517/vm-test
+        default: ""
       image_tag_prefix:
         required: false
         type: string
@@ -58,6 +58,8 @@ on:
         value: ${{ jobs.container_pipeline.outputs.image_ref }}
       image_latest_ref:
         value: ${{ jobs.container_pipeline.outputs.image_latest_ref }}
+      trivy_status:
+        value: ${{ jobs.container_pipeline.outputs.trivy_status }}
 
 permissions:
   contents: read
@@ -71,7 +73,7 @@ jobs:
       image_tag: ${{ steps.image_meta.outputs.image_tag }}
       image_ref: ${{ steps.image_meta.outputs.image_ref }}
       image_latest_ref: ${{ steps.image_meta.outputs.image_latest_ref }}
-
+      trivy_status: ${{ steps.trivy_report.outputs.status }}
     env:
       DISCORD_WEBHOOK: ${{ secrets.discord_webhook }}
       LOCAL_IMAGE_NAME: credflow-api-ci
@@ -86,7 +88,6 @@ jobs:
           Repository : ${{ github.repository }}
           Branch/Tag : ${{ github.ref_name }}
           Trigger    : ${{ github.event_name == 'workflow_dispatch' && 'Manual' || 'Auto' }}
-          Commit     : ${{ github.sha }}
           Container pipeline has started.
           Run:
           https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -319,9 +320,7 @@ jobs:
           # PASSED - no report
           # ------------------------------------------------
           if [ "$STATUS" = "PASSED" ]; then
-            echo "Trivy : PASSED"
-            echo "No actionable vulnerabilities found."
-            echo "EOL/version-related warnings are ignored."
+          echo "Trivy PASSED. No report will be generated."
             exit 0
           fi
 
@@ -347,10 +346,12 @@ jobs:
               echo
 
               jq -r '
-                .runs[].results[] |
-                "Severity : \(.level)\n" +
-                "Rule     : \(.ruleId)\n" +
-                "Message  : \(.message.text)\n" +
+              [.runs[].results[]]
+              | .[:100]
+              | .[]
+              | "Severity : \(.level)\n" +
+              "Rule     : \(.ruleId)\n" +
+              "Message  : \(.message.text)\n" +
                 "------------------------------------------"
               ' trivy-filtered.sarif
 
@@ -381,6 +382,36 @@ jobs:
 
             exit 1
           fi
+
+      - name: Send Trivy Failed Alert
+        if: always() && steps.trivy_report.outputs.status == 'FAILED' && env.DISCORD_WEBHOOK != ''
+        run: |
+          CONTENT=$(cat <<EOF
+          🚨 **Trivy Vulnerability Scan Failed**
+
+          Repository : ${{ github.repository }}
+          Branch/Tag : ${{ github.ref_name }}
+          Image      : ${{ steps.image_meta.outputs.image_ref }}
+
+          Status : ❌ FAILED
+          Actionable Vulnerabilities : ${{ steps.trivy_report.outputs.count }}
+
+          EOL/version-related warnings are excluded.
+
+          Run:
+          ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+          )
+
+          CURL_ARGS=(
+            -F "content=${CONTENT}"
+          )
+
+          if [ -f trivy-report.txt ]; then
+            CURL_ARGS+=(-F "file=@trivy-report.txt")
+          fi
+
+          curl -sS "${CURL_ARGS[@]}" "$DISCORD_WEBHOOK"
 
       - name: Upload Trivy Report
         if: always() && (steps.trivy_report.outputs.status == 'FAILED' || steps.trivy_report.outputs.status == 'ERROR')
@@ -429,44 +460,6 @@ jobs:
           docker image rm "${{ steps.image_meta.outputs.image_latest_ref }}" || true
           docker image prune -af || true
           docker builder prune -af || true
-
-      - name: Send Security Reports to Discord
-        if: always() && env.DISCORD_WEBHOOK != ''
-        run: |
-          GITLEAKS_STATUS="${{ steps.gitleaks.outputs.status }}"
-          TRIVY_STATUS="${{ steps.trivy_report.outputs.status }}"
-          [ -z "$GITLEAKS_STATUS" ] && GITLEAKS_STATUS="UNKNOWN"
-          [ -z "$TRIVY_STATUS" ] && TRIVY_STATUS="UNKNOWN"
-
-          CONTENT=$(cat <<EOF
-          🔒 **Container Security Scan Report**
-
-          Repository : ${{ github.repository }}
-          Branch     : ${{ github.ref_name }}
-
-          Gitleaks : ${GITLEAKS_STATUS}
-          Trivy    : ${TRIVY_STATUS}
-
-          Run:
-          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          EOF
-          )
-
-          CURL_ARGS=(
-            -F "content=${CONTENT}"
-          )
-
-          # Attach Gitleaks report only when FAILED
-          if [ "$GITLEAKS_STATUS" = "FAILED" ] && [ -f gitleaks-report.txt ]; then
-            CURL_ARGS+=(-F "file1=@gitleaks-report.txt")
-          fi
-
-          # Attach Trivy report ONLY when FAILED
-          if [ "$TRIVY_STATUS" = "FAILED" ] && [ -f trivy-report.txt ]; then
-            CURL_ARGS+=(-F "file2=@trivy-report.txt")
-          fi
-
-          curl "${CURL_ARGS[@]}" "$DISCORD_WEBHOOK"
 
       - name: post hook
         if: always()
