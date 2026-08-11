@@ -461,6 +461,50 @@ jobs:
           docker image prune -af || true
           docker builder prune -af || true
 
+      - name: Send Security Reports to Discord
+        if: always() && env.DISCORD_WEBHOOK != ''
+        run: |
+          GITLEAKS_STATUS="${{ steps.gitleaks.outputs.status }}"
+          TRIVY_STATUS="${{ steps.trivy_report.outputs.status }}"
+
+          [ -z "$GITLEAKS_STATUS" ] && GITLEAKS_STATUS="UNKNOWN"
+          [ -z "$TRIVY_STATUS" ] && TRIVY_STATUS="UNKNOWN"
+
+          CONTENT=$(cat <<EOF
+          🔒 **Container Security Scan Report**
+
+          Repository : ${{ github.repository }}
+          Branch     : ${{ github.ref_name }}
+
+          Gitleaks : ${GITLEAKS_STATUS}
+          Trivy    : ${TRIVY_STATUS}
+
+          Run:
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+          )
+
+          CURL_ARGS=(
+            -sS
+            -F "content=${CONTENT}"
+          )
+
+          # Gitleaks report only when FAILED
+          if [ "$GITLEAKS_STATUS" = "FAILED" ] && [ -f gitleaks-report.txt ]; then
+            CURL_ARGS+=(
+              -F "file1=@gitleaks-report.txt"
+            )
+          fi
+
+          # Trivy report only when FAILED
+          if [ "$TRIVY_STATUS" = "FAILED" ] && [ -f trivy-report.txt ]; then
+            CURL_ARGS+=(
+              -F "file2=@trivy-report.txt"
+            )
+          fi
+
+          curl "${CURL_ARGS[@]}" "$DISCORD_WEBHOOK"
+
       - name: post hook
         if: always()
         run: |
