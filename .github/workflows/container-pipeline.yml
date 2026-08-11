@@ -489,14 +489,14 @@ jobs:
           if [ "$GITLEAKS_STATUS" = "PASSED" ] && [ "$TRIVY_STATUS" = "PASSED" ]; then
 
             CONTENT=$(cat <<EOF
-            ✅ **Container Pipeline PASSED**
+          ✅ **Container Pipeline PASSED**
 
-            Repository : ${{ github.repository }}
-            Branch     : ${{ github.ref_name }}
+          Repository : ${{ github.repository }}
+          Branch     : ${{ github.ref_name }}
 
-            Gitleaks : PASSED
-            Trivy    : PASSED
-            EOF
+          Gitleaks : PASSED
+          Trivy    : PASSED
+          EOF
             )
 
             curl -sS \
@@ -544,7 +544,7 @@ jobs:
             )
           fi
 
-          curl "${CURL_ARGS[@]}" "$DISCORD_WEBHOOK"
+          curl -sS "${CURL_ARGS[@]}" "$DISCORD_WEBHOOK"
 
       - name: post hook
         if: always()
