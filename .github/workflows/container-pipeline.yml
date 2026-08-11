@@ -316,11 +316,24 @@ jobs:
           echo "Trivy status: $STATUS"
           echo "Actionable findings: $COUNT"
 
-          # ------------------------------------------------
-          # PASSED - no report
-          # ------------------------------------------------
           if [ "$STATUS" = "PASSED" ]; then
-          echo "Trivy PASSED. No report will be generated."
+            {
+              echo "===================================================="
+              echo "                 TRIVY SCAN REPORT"
+              echo "===================================================="
+              echo
+              echo "Repository : ${{ github.repository }}"
+              echo "Branch     : ${{ github.ref_name }}"
+              echo "Image      : ${{ steps.image_meta.outputs.image_ref }}"
+              echo "Generated  : $(date -u)"
+              echo
+              echo "Status : PASSED ✅"
+              echo "Actionable Vulnerabilities : 0"
+              echo
+              echo "EOL/version-related warnings are excluded."
+            } > trivy-report.txt
+
+            echo "Trivy PASSED. Report generated."
             exit 0
           fi
 
@@ -414,7 +427,7 @@ jobs:
           curl -sS "${CURL_ARGS[@]}" "$DISCORD_WEBHOOK"
 
       - name: Upload Trivy Report
-        if: always() && (steps.trivy_report.outputs.status == 'FAILED' || steps.trivy_report.outputs.status == 'ERROR')
+        if: always() && (steps.trivy_report.outputs.status == 'PASSED' || steps.trivy_report.outputs.status == 'FAILED')
         uses: actions/upload-artifact@v4
         with:
           name: trivy-report
@@ -470,8 +483,34 @@ jobs:
           [ -z "$GITLEAKS_STATUS" ] && GITLEAKS_STATUS="UNKNOWN"
           [ -z "$TRIVY_STATUS" ] && TRIVY_STATUS="UNKNOWN"
 
+          # ================================================
+          # CONTAINER PIPELINE PASS
+          # ================================================
+          if [ "$GITLEAKS_STATUS" = "PASSED" ] && [ "$TRIVY_STATUS" = "PASSED" ]; then
+
+            CONTENT=$(cat <<EOF
+            ✅ **Container Pipeline PASSED**
+
+            Repository : ${{ github.repository }}
+            Branch     : ${{ github.ref_name }}
+
+            Gitleaks : PASSED
+            Trivy    : PASSED
+            EOF
+            )
+
+            curl -sS \
+              -F "content=${CONTENT}" \
+              "$DISCORD_WEBHOOK"
+
+            exit 0
+          fi
+
+          # ================================================
+          # CONTAINER PIPELINE FAIL
+          # ================================================
           CONTENT=$(cat <<EOF
-          🔒 **Container Security Scan Report**
+          ❌ **Container Pipeline FAILED**
 
           Repository : ${{ github.repository }}
           Branch     : ${{ github.ref_name }}
@@ -479,8 +518,10 @@ jobs:
           Gitleaks : ${GITLEAKS_STATUS}
           Trivy    : ${TRIVY_STATUS}
 
+          Security scan failed. Deployment will not start.
+
           Run:
-          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EOF
           )
 
@@ -489,14 +530,14 @@ jobs:
             -F "content=${CONTENT}"
           )
 
-          # Gitleaks report only when FAILED
+          # Gitleaks report ONLY when Gitleaks failed
           if [ "$GITLEAKS_STATUS" = "FAILED" ] && [ -f gitleaks-report.txt ]; then
             CURL_ARGS+=(
               -F "file1=@gitleaks-report.txt"
             )
           fi
 
-          # Trivy report only when FAILED
+          # Trivy report ONLY when Trivy failed
           if [ "$TRIVY_STATUS" = "FAILED" ] && [ -f trivy-report.txt ]; then
             CURL_ARGS+=(
               -F "file2=@trivy-report.txt"
