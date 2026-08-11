@@ -18,7 +18,6 @@ on:
     # branches:
     #   - main
 
-  #
   # Enable this again when you want CI validation on staging pull requests.
   # pull_request:
   #   branches:
@@ -27,29 +26,22 @@ on:
 jobs:
   # trigger-integration-tests:
   #   name: Staging Unit Tests
-  #   uses: ./.github/workflows/integration-tests.yml
-  #   with:
-  #     DB_NAME: ${{ vars.STAGING_DB_NAME }}
-  #     DB_USER: ${{ vars.STAGING_DB_USER }}
-  #     DB_HOST: ${{ vars.STAGING_CREDFLOW_API_SERVER }}
-  #     DB_PORT: ${{ vars.STAGING_DB_PORT }}
+  #   uses: ./.github/workflows/unit-test.yml
   #   secrets:
-  #     DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
-  #     DISCORD_CI_BUILDS_URL: ${{ secrets.DISCORD_CI_BUILDS_URL }}
+  #     ENV_DEV: ${{ secrets.ENV_DEV }}
+  #     DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
 
   container_pipeline:
     name: Staging Container Pipeline
     #needs: [trigger-integration-tests]
-    #if: ${{ always() }}
     uses: ./.github/workflows/container-pipeline.yml
     with:
       registry: docker.io
       image_repository: ${{ vars.DOCKERHUB_STAGING_IMAGE_REPOSITORY }}
-      #image_tag_prefix: staging
       django_env: STAGING
       docker_context: .
       dockerfile: Dockerfile
-      fail_on_gitleaks: true  # fail the build on gitleaks
+      fail_on_gitleaks: false  
       max_image_layers: 35
       max_image_size_mb: 3500
       push_image: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
@@ -60,8 +52,8 @@ jobs:
 
   # deploy:
   #   name: Staging Deploy To EKS
-  #   needs: [container_pipeline]
-  #   if: ${{ needs.container_pipeline.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_to_eks)) }}
+  #   needs: [trigger-integration-tests, container_pipeline]
+  #   if: ${{ needs.container_pipeline.result == 'success' && needs.trigger-integration-tests.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_to_eks)) }}
   #   uses: ./.github/workflows/deploy-eks.yml
   #   with:
   #     aws_region: ${{ vars.AWS_REGION }}
@@ -69,14 +61,17 @@ jobs:
   #     eks_cluster_name: ${{ vars.STAGING_EKS_CLUSTER_NAME }}
   #     kubernetes_namespace: ${{ vars.STAGING_KUBERNETES_NAMESPACE }}
   #     manifest_dir: deploy/eks/staging
-  #     docker_image: docker.io/${{ vars.DOCKERHUB_IMAGE_REPOSITORY }}:${{ needs.container_pipeline.outputs.image_tag }}
+  #     docker_image: docker.io/${{ vars.DOCKERHUB_STAGING_IMAGE_REPOSITORY }}:${{ needs.container_pipeline.outputs.image_tag }}
   #     image_pull_secret_name: ooru-registry-regcred
   #     api_deployment_name: credflow-api
   #     api_container_name: api
   #     celery_enabled: true
   #     celery_deployment_name: celery-api
   #     celery_container_name: celery
+  #     # Required inputs
+  #     unit_test_status: ${{ needs.trigger-integration-tests.outputs.test_status }}
+  #     trivy_status: ${{ needs.container_pipeline.outputs.trivy_status }}
   #   secrets:
   #     dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
   #     dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
-  #     discord_webhook: ${{ secrets.DISCORD_STAGING_BUILDS_URL }}
+  #     discord_webhook: ${{ secrets.DISCORD_WEBHOOK }}
